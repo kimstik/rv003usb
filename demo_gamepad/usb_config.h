@@ -6,16 +6,24 @@
 //Defines the number of endpoints for this device. (Always add one for EP0). For two EPs, this should be 3.
 #define ENDPOINTS 2
 
-#define USB_PORT D     // [A,C,D] GPIO Port to use with D+, D- and DPU
-#define USB_PIN_DP 3   // [0-4] GPIO Number for USB D+ Pin
-#define USB_PIN_DM 4   // [0-4] GPIO Number for USB D- Pin
-#define USB_PIN_DPU 5  // [0-7] GPIO for feeding the 1.5k Pull-Up on USB D- Pin; Comment out if not used / tied to 3V3!
+#if __riscv
+	#define USB_PORT D     // [A,C,D] GPIO Port to use with D+, D- and DPU
+	#define USB_PIN_DP 3   // [0-4] GPIO Number for USB D+ Pin
+	#define USB_PIN_DM 4   // [0-4] GPIO Number for USB D- Pin
+	#define USB_PIN_DPU 5  // [0-7] GPIO for feeding the 1.5k Pull-Up on USB D- Pin; Comment out if not used / tied to 3V3!
+#else
+	#define USB_PORT B     // [A,B,C,F] GPIO Port to use with D+, D- and DPU
+	#define USB_PIN_DP 0   // [0-15] GPIO Number for USB D+ Pin
+	#define USB_PIN_DM 3   // [0-15] GPIO Number for USB D- Pin
+	#define USB_PIN_DPU 2  // [0-15] GPIO for feeding the 1.5k Pull-Up on USB D- Pin; Comment out if not used / tied to 3V3!
+#endif
 
 #define RV003USB_OPTIMIZE_FLASH 0
 #define RV003USB_HANDLE_IN_REQUEST 1
 #define RV003USB_OTHER_CONTROL 0
 #define RV003USB_HANDLE_USER_DATA 0
 #define RV003USB_HID_FEATURES 0
+#define RV003USB_USE_REBOOT_FEATURE_REPORT 0
 
 #ifndef __ASSEMBLER__
 

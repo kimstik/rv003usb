@@ -1,0 +1,114 @@
+##### Project #####
+
+PROJECT			?= $(shell basename `pwd`)
+# The path for generated files
+BUILD_DIR		= Build
+
+# MCU types: 
+#   PY32F002Ax5
+#   PY32F002Bx5
+#   PY32F003x4, PY32F003x6, PY32F003x8,
+#   PY32F030x6, PY32F030x8, 
+MCU_TYPE		= PY32F002Bx5
+
+##### Options #####
+
+# Use LL library instead of HAL, y:yes, n:no
+USE_LL_LIB ?= y
+# Enable printf float %f support, y:yes, n:no
+ENABLE_PRINTF_FLOAT	?= n
+# Programmer, jlink or pyocd
+FLASH_PROGRM	?= pyocd
+
+##### Toolchains #######
+
+ARM_TOOLCHAIN	?= /usr/bin
+
+# path to JLinkExe
+JLINKEXE		?= /opt/SEGGER/JLink/JLinkExe
+# path to PyOCD
+PYOCD_EXE		?= pyocd
+
+##### Paths ############
+
+# C and CPP source folders
+CDIRS		:= . ../rv003usb
+# Single C and CPP source files
+CFILES		:= 
+CPPFILES	:= 
+
+# ASM source folders
+ADIRS		:= 
+# Single ASM source files
+AFILES		:= ./Build/../rv003usb/rv003usb-arm.o
+
+# Include paths
+INCLUDES	:= ../py32f0-template/Libraries/CMSIS/Core/Include \
+			../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Include \
+			../lib \
+			../rv003usb \
+			$(CDIRS)
+
+##### Library Paths ############
+
+# Library flags
+LIB_FLAGS		= $(MCU_TYPE)
+# JLink device (Uppercases)
+JLINK_DEVICE	?= $(shell echo $(MCU_TYPE) | tr '[:lower:]' '[:upper:]')
+# PyOCD device (Lowercases)
+PYOCD_DEVICE	?= $(shell echo $(MCU_TYPE) | tr '[:upper:]' '[:lower:]')
+# Link descript file: 
+LDSCRIPT		= ../py32f0-template/Libraries/LDScripts/$(PYOCD_DEVICE).ld
+
+
+ifneq (,$(findstring PY32F002B,$(MCU_TYPE)))
+
+# PY32F002B >>>
+CFILES		+= ../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Source/system_py32f002b.c
+CDIRS		+= ../py32f0-template/Libraries/PY32F002B_LL_Driver/Src \
+		../py32f0-template/Libraries/PY32F002B_LL_BSP/Src
+INCLUDES	+= ../py32f0-template/Libraries/PY32F002B_LL_Driver/Inc \
+		../py32f0-template/Libraries/PY32F002B_LL_BSP/Inc
+LIB_FLAGS   += USE_FULL_LL_DRIVER
+# Startup file
+AFILES	+= ../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Source/gcc/startup_py32f002b.s
+# PY32F002B <<<
+
+else
+
+# PY32F002A,003,030 >>>
+CFILES		+= ../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Source/system_py32f0xx.c
+
+ifeq ($(USE_LL_LIB),y)
+CDIRS		+= ../py32f0-template/Libraries/PY32F0xx_LL_Driver/Src \
+		../py32f0-template/Libraries/PY32F0xx_LL_BSP/Src
+INCLUDES	+= ../py32f0-template/Libraries/PY32F0xx_LL_Driver/Inc \
+		../py32f0-template/Libraries/PY32F0xx_LL_BSP/Inc
+LIB_FLAGS   += USE_FULL_LL_DRIVER
+else
+CDIRS		+= ../py32f0-template/Libraries/PY32F0xx_HAL_Driver/Src \
+		../py32f0-template/Libraries/PY32F0xx_HAL_BSP/Src
+INCLUDES	+= ../py32f0-template/Libraries/PY32F0xx_HAL_Driver/Inc \
+		../py32f0-template/Libraries/PY32F0xx_HAL_BSP/Inc
+endif
+# Startup file
+ifneq (,$(findstring PY32F002A,$(LIB_FLAGS)))
+AFILES	+= ../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Source/gcc/startup_py32f002a.s
+endif
+ifneq (,$(findstring PY32F003,$(LIB_FLAGS)))
+AFILES	+= ../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Source/gcc/startup_py32f003.s
+endif
+ifneq (,$(findstring PY32F030,$(LIB_FLAGS)))
+AFILES	+= ../py32f0-template/Libraries/CMSIS/Device/PY32F0xx/Source/gcc/startup_py32f030.s
+endif
+# PY32F002A,003,030 <<<
+
+endif
+
+include ../py32f0-template/rules.mk
+
+# Compile asm to obj
+$(BDIR)/%.o: %.S
+	@printf "  AS\t$<\n"
+	@mkdir -p $(dir $@)
+	$(Q)$(CC) $(TGT_ASFLAGS) $(TGT_INCFLAGS) -o $@ -c $<

@@ -23,6 +23,16 @@
 
 #define USB_GPIO_BASE LOCAL_EXP_BASE( GPIO, USB_PORT )
 
+#if __riscv
+	#define USB_DM_IRQ EXTI7_0_IRQ
+#elif USB_PIN_DM == 0 || USB_PIN_DM == 1
+	#define USB_DM_IRQ EXTI0_1_IRQ
+#elif USB_PIN_DM == 2 || USB_PIN_DM == 3
+	#define USB_DM_IRQ EXTI2_3_IRQ
+#else
+	#define USB_DM_IRQ EXTI4_15_IRQ
+#endif
+
 // Public stuff:
 
 /* Here are your options:

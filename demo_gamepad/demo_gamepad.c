@@ -1,4 +1,13 @@
-#include "ch32v003fun.h"
+#if __riscv
+	#include "ch32v003fun.h"
+#else
+	#if PY32F002Bx5
+		#include "py32f002b_bsp_clock.h"
+	#else // PY32F0xx
+		#include "py32f0xx_bsp_clock.h"
+	#endif
+	#define Delay_Ms LL_mDelay
+#endif
 #include <stdio.h>
 #include <string.h>
 #include "rv003usb.h"
@@ -6,6 +15,11 @@
 int main()
 {
 	SystemInit();
+#if PY32F002Bx5
+	BSP_RCC_HSI_48MConfig();
+#elif PY32F030x8
+	BSP_RCC_HSE_PLLConfig();
+#endif
 	Delay_Ms(1); // Ensures USB re-enumeration after bootloader or reset; Spec demand >2.5µs ( TDDIS )
 	usb_setup();
 	while(1);

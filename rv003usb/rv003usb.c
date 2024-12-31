@@ -7,7 +7,17 @@
 
 #if !defined(RV003USB_CUSTOM_C) || RV003USB_CUSTOM_C == 0
 
-#include "ch32v003fun.h"
+#if __riscv
+	#include "ch32v003fun.h"
+#elif PY32F002Bx5
+	#include "py32f002b_ll_bus.h"
+	#include "py32f002b_ll_exti.h"
+	#include "py32f002b_ll_gpio.h"
+#else // PY32F0xx
+	#include "py32f0xx_ll_bus.h"
+	#include "py32f0xx_ll_exti.h"
+	#include "py32f0xx_ll_gpio.h"
+#endif
 
 #define ENDPOINT0_SIZE 8 //Fixed for USB 1.1, Low Speed.
 
@@ -49,7 +59,11 @@ void usb_setup()
 	rv003usb_internal_data.se0_windup = 0;
 
 	// Enable GPIOs, TIMERs
+#if __riscv
 	RCC->APB2PCENR |= LOCAL_EXP( RCC_APB2Periph_GPIO, USB_PORT ) | RCC_APB2Periph_AFIO;
+#else
+	LL_IOP_GRP1_EnableClock(LOCAL_EXP(LL_IOP_GRP1_PERIPH_GPIO, USB_PORT));
+#endif
 
 #if defined( RV003USB_DEBUG_TIMING ) && RV003USB_DEBUG_TIMING
 	{
@@ -91,6 +105,7 @@ void usb_setup()
 	}
 #endif
 
+#if __riscv
 	// GPIO Setup
 	LOCAL_EXP( GPIO, USB_PORT )->CFGLR = 
 		( LOCAL_EXP( GPIO, USB_PORT )->CFGLR & 
@@ -115,9 +130,32 @@ void usb_setup()
 	// This drives USB_PIN_DPU (D- Pull-Up) high, which will tell the host that we are going on-bus.
 	LOCAL_EXP(GPIO,USB_PORT)->BSHR = 1<<USB_PIN_DPU;
 #endif
+#else
+	// GPIO Setup
+	LL_GPIO_SetPinMode(LOCAL_EXP(GPIO, USB_PORT), 1 << USB_PIN_DP, LL_GPIO_MODE_INPUT);
+	LL_GPIO_SetPinMode(LOCAL_EXP(GPIO, USB_PORT), 1 << USB_PIN_DM, LL_GPIO_MODE_INPUT);
+
+#ifdef USB_PIN_DPU
+	LL_GPIO_SetPinMode(LOCAL_EXP(GPIO, USB_PORT), 1 << USB_PIN_DPU, LL_GPIO_MODE_OUTPUT);
+	LL_GPIO_SetPinOutputType(LOCAL_EXP(GPIO, USB_PORT), 1 << USB_PIN_DPU, LL_GPIO_OUTPUT_PUSHPULL);
+	LL_GPIO_SetPinSpeed(LOCAL_EXP(GPIO, USB_PORT), 1 << USB_PIN_DPU, LL_GPIO_SPEED_FREQ_VERY_HIGH);
+#endif
+
+#if PY32F002Bx5
+	// Configure USB_PIN_DM (D-) as an interrupt on falling edge.
+	LL_EXTI_SetEXTISource(LOCAL_EXP(LL_EXTI_CONFIG_PORT, USB_PORT), LOCAL_EXP(LL_EXTI_CONFIG_LINE, USB_PIN_DM));
+	LL_EXTI_EnableIT(LOCAL_EXP(LL_EXTI_LINE_, USB_PIN_DM));
+	LL_EXTI_EnableFallingTrig(LOCAL_EXP(LL_EXTI_LINE_, USB_PIN_DM));
+#endif
+
+#ifdef USB_PIN_DPU
+	// This drives USB_PIN_DPU (D- Pull-Up) high, which will tell the host that we are going on-bus.
+	LL_GPIO_SetOutputPin(LOCAL_EXP(GPIO, USB_PORT), 1 << USB_PIN_DPU);
+#endif
+#endif
 
 	// enable interrupt
-	NVIC_EnableIRQ( EXTI7_0_IRQn );
+	NVIC_EnableIRQ( LOCAL_EXP(USB_DM_IRQ, n) );
 }
 
 
