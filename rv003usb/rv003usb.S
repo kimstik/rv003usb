@@ -91,9 +91,9 @@ EXTI7_0_IRQHandler:
 #if defined(CH32V00x) && CH32V00x
 	VOOXDELAY
 	c.bnez a0, 1f
-	auipc t0, %hi(handle_se0_keepalive)
-	addi t0, t0, %lo(handle_se0_keepalive)
-	c.jr t0
+	auipc a0, %hi(handle_se0_keepalive)
+	addi a0, a0, %lo(handle_se0_keepalive)
+	c.jr a0
 	1:
 #else
 	c.beqz a0, handle_se0_keepalive
