@@ -61,9 +61,12 @@ EXTI7_0_IRQHandler:
 	sw	a4, 16(sp)
 	sw	s1, 28(sp)
 
-	SAVE_DEBUG_MARKER( 48 );
+	SAVE_DEBUG_MARKER( 48 );     // kept: its 1 cycle sets the preamble
+	                             // sampling cadence (x4 value is dead)
 #if !defined( CH32V003 )
 	DEBUG_TICK_SETUP
+	// (RX v2 uses no debug tick and never dereferences x4/tp, so the
+	//  paired RESTOREs are dropped; only this SAVE stays, for timing.)
 #endif
 	c.lw a1, INDR_OFFSET(a5)
 	c.andi a1, USB_DMASK;
@@ -110,7 +113,8 @@ syncout:
 preamble_loop:
 #if defined( CH32V003 )
 	// RX v2: x4/tp is not loaded in the ISR prologue anymore (debug tick
-	// setup removed); keep the 2 cycles with a harmless load instead.
+	// setup removed); keep the 2 cycles with a harmless load to preserve
+	// the preamble sampling cadence.
 	c.lwsp s0, 0(sp)
 #else
 	DEBUG_TICK_MARK
@@ -298,12 +302,11 @@ rx_stuff:                            // entry (early c.beqz s0 taken) retires
 	c.lwsp a0, 0(sp)             // bigger step than the ordinary zero-bit
 	c.nop                        // +2 (all-ones traffic corrects only
 	                             // every 7th bit: authority 4/224)
-8:	c.lwsp a0, 0(sp)
-	c.lwsp a0, 0(sp)
-	c.lwsp a0, 0(sp)
-	c.lwsp a0, 0(sp)
+8:	c.li a0, 2                   // 8-cycle filler (spin; parity even
+5:	c.addi a0, -1                // both ways in)
+	c.bnez a0, 5b
 	c.lw a4, INDR_OFFSET(a5)     // PRE (healthy: starts E+28)
-	c.j bit_process              // retires E+34 (healthy) / E+36 (corr):
+	c.j bit_process              // retires E+34 (healthy) / E+38 (corr):
 	                             // the stuffed cell renders one normal
 	                             // 32-cycle slot, dt across = 64 exact
 #else
@@ -491,7 +494,9 @@ not_is_end_of_byte_and_bit_stuffed:
 #endif
 #endif /* CH32V003 RX v2 */
 
+#if !defined( CH32V003 )
 .balign 4
+#endif
 se0_complete:
 	// This is triggered when we finished getting a packet.
 #if defined( CH32V003 )
@@ -535,7 +540,9 @@ se0_complete:
 	addi a5, a0, -0b01001011
 #endif
 
+#if !defined( CH32V003 )
 	RESTORE_DEBUG_MARKER(48) // restore x4 for whatever in C land.
+#endif
 
 #if defined( CH32V003 )
 	lui a4, %hi(rv003usb_internal_data)     // 6 bytes vs la's 8 (addi
@@ -583,7 +590,7 @@ may_be_a_token:
 	bne s0, a0, done_usb_message // addr != 0 && addr != ours.
 yes_check_tokens:
 #if defined( CH32V003 )
-	addi a5, a5, (0xD2-0xE1)     // natural: OUT = 0xE1
+	c.addi a5, (0xD2-0xE1)       // natural: OUT = 0xE1 (diff fits imm6)
 	c.beqz a5, usb_pid_handle_out
 	addi a5, a5, (0xE1-0x69)     // IN = 0x69
 	c.beqz a5, usb_pid_handle_in
@@ -603,37 +610,106 @@ yes_check_tokens:
 	// CRC is nonzero. (Good for Data packets)
 crc_for_tokens_would_be_bad_maybe_data:
 #if defined( CH32V003 )
-	// Data packet: table CRC16 (idea 4.1a) over payload+CRC bytes;
-	// residual 0xB001 (init 0xFFFF, no xorout - same invariant as the
-	// old in-slot computation). ~26 cycles/byte, <=10 bytes.
+	// tier (b): the ACK is transmitted with the CRC16 check PIPELINED
+	// into the spare cycles of its own TX bit slots (ideas 4.1b/6.2a).
+	// 20 TX slots (4 idle "J" lead-in bits + SYNC 8 + PID 8); each slot
+	// pair folds one buffer byte (2 nibbles) => exactly 10 bytes
+	// (payload + CRC16) are verified by the time the PID finishes.
+	// The EOP is sent ONLY if the residual is 0xB001; on a bad CRC the
+	// line simply returns to J mid-packet - no EOP means the host
+	// discards the truncated packet and retries. The SOP therefore goes
+	// out ~5 bit-times after the host EOP: inside the 7.5-bit spec
+	// (the old post-SE0 serial CRC pushed it to 13.5).
+	// The C handler no longer sends the ACK (see bootloader.c).
+	// The fold count is the actual byte count (payload + CRC16), so
+	// packets of ANY length ACK correctly - notably the zero-length
+	// DATA1 of a control-transfer STATUS stage (byte_count == 2, the two
+	// CRC bytes). The ACK is always 20 bits (SYNC+PID+lead-in); when the
+	// packet is shorter than 10 bytes the remaining bits go out in a
+	// time-matched TX-only tail. The tail delay touches only a0, so the
+	// residual in a3 (correct after exactly byte_count folds) survives
+	// straight into the verdict.
 	sub s0, t2, a1               // byte count (excl. PID)
-	blez s0, done_usb_message_in // guard: SE0 right after PID
-	c.mv a2, a1
+	c.beqz s0, done_usb_message_in // guard: SE0 right after PID
+	sw a5, 44(sp)                // park the PID cascade value (free slot)
+	// GPIO to output, line at J:
+	jal t1, tx_pins_cfg          // a5=GPIO, a4=output CFGLR word
+	li s1, (1<<USB_PIN_DM) | (1<<(USB_PIN_DP+16)) // BSHR: DM set,
+	c.sw s1, 16(a5)              //   DP reset = J
+	c.sw a4, 0(a5)               // pins now driven at J (same as idle)
+	// stream state: a1 = data ptr (preserved - it is the handler's 2nd
+	// arg), a2 bits, s1 bshr, t1 toggle, a3 crc, a4 walker, t0 table,
+	// tp = byte_count (tp is otherwise unused in RX v2).
+	lui t1, 0x180
+	addi t1, t1, 24              // 0x180018: toggle-both BSHR mask
+	addi t0, zero, %lo(rx_crc16_tbl) // nibble table (fw links at 0)
+	c.mv a4, a1                  // walker (a1 stays = data ptr)
+	c.mv tp, s0                  // tp = byte_count (survivor)
 	c.lui a3, 0x10
-	c.addi a3, -1                // 0xFFFF
-	addi t1, zero, %lo(rx_crc16_tbl) // table via t1: a4 (ist) stays live
-7:	XW_C_LBU(s1, a2, 0)          // per byte: 2 nibbles via inner loop
-	c.addi a2, 1
-	c.li t0, 2
-8:	c.mv a0, s1
+	c.addi a3, -1                // CRC = 0xFFFF
+	lui a2, 0xd3
+	addi a2, a2, -0x7F1          // 0xD280F: 1111,10000000,01001011 LSB
+	// --- fold loop: byte_count slot pairs (each folds one buffer byte) ---
+7:	// --- slot A: send bit, fold low nibble of the byte at a4 ---
+	c.jal ack_tx_bit
+	XW_C_LBU(a0, a4, 0)
 	c.xor a0, a3
 	c.andi a0, 15
 	c.slli a0, 1
-	c.add a0, t1
+	c.add a0, t0
 	XW_C_LHU(a0, a0, 0)
 	c.srli a3, 4
 	c.xor a3, a0
-	c.srli s1, 4
-	c.addi t0, -1
-	bnez t0, 8b                  // t0 is not a compressed reg: 32-bit form
+	// --- slot B: send bit, fold high nibble (byte re-read) ---
+	c.jal ack_tx_bit
+	XW_C_LBU(a0, a4, 0)
+	c.addi a4, 1
+	c.srli a0, 4
+	c.xor a0, a3
+	c.andi a0, 15
+	c.slli a0, 1
+	c.add a0, t0
+	XW_C_LHU(a0, a0, 0)
+	c.srli a3, 4
+	c.xor a3, a0
 	c.addi s0, -1
 	c.bnez s0, 7b
+	// --- tail: remaining (20 - 2*byte_count) ACK bits, TX only, cell
+	// width matched by an a0 delay (does not touch a3, so the residual
+	// computed above is preserved straight into the verdict). For a full
+	// 10-byte packet the tail is empty (the eye-sweep data case). ---
+	c.li s0, 10
+	sub s0, s0, tp               // remaining pairs (tp = byte_count)
+	c.slli s0, 1                 // -> remaining bits
+	c.beqz s0, 3f
+8:	c.jal ack_tx_bit
+	c.li a0, 2                   // delay -> ~32-cycle cell
+6:	c.addi a0, -1
+	c.bnez a0, 6b
+	c.addi s0, -1
+	c.bnez s0, 8b
+3:	// verdict: residual must be 0xB001. Reuse usb_send_data's ending:
+	// push the 16-byte frame its epilogue pops, point ra at our
+	// continuation, and jump into the EOP path (good CRC) or into
+	// tx_line_release (bad CRC: J + inputs, NO EOP -> host retries).
 	lui s0, 0xb
-	c.addi s0, 1                 // 0xB001
+	c.addi s0, 1
 	c.sub a3, s0
-	c.bnez a3, done_usb_message_in
-	sub a3, t2, a1 //a3 = # of bytes read..
+	c.addi sp, -16               // fake usb_send_data frame (s0/s1/tp
+	                             // are already saved in the ISR frame)
+	addi ra, zero, %lo(done_usb_message_in) // bad path: ret = drop
+	c.bnez a3, 9f
+	addi ra, zero, %lo(1f)       // good path: ret = continuation
+	c.j no_really_done_sending_data // EOP + line release + ret
+9:	c.j tx_line_release          // bad CRC: no EOP, ret -> drop
+1:	// continuation (only the good path lands here; sp restored)
+	addi ra, zero, %lo(done_usb_message_in) // restore handler return
+	c.mv a3, tp                  // length arg = byte_count + 1
 	c.addi a3, 1
+	// good: restore dispatch state, then the C handler (ACK already out)
+	c.lwsp a5, 44(sp)
+	lui a4, %hi(rv003usb_internal_data)
+	addi a4, a4, %lo(rv003usb_internal_data)
 #else
 	li s0, 0xb001  // UGH: You can't use the CRC16 in reverse :(
 	c.sub a3, s0
@@ -661,7 +737,8 @@ crc_for_tokens_would_be_bad_maybe_data:
 done_usb_message:
 done_usb_message_in:
 	lw	s0, 24(sp)
-	lw	s1, 28(sp)
+	// (s1 reload dropped: falls through to ret_from_se0 which reloads it
+	//  at the same slot, and nothing below reads s1 before then)
 	lw	t0, 32(sp)
 	lw	t1, 36(sp)
 	lw	t2, 40(sp)
@@ -669,7 +746,9 @@ done_usb_message_in:
 
 ret_from_se0:
 	lw	s1, 28(sp)
+#if !defined( CH32V003 )
 	RESTORE_DEBUG_MARKER(48)
+#endif
 	lw	a2, 8(sp)
 	lw	a3, 12(sp)
 	lw	a4, 16(sp)
@@ -691,10 +770,34 @@ interrupt_complete:
 	mret
 
 #if defined( CH32V003 )
-	// RX v2 post-SE0 CRC nibble tables (reflected polynomials).
-	// Kept below 0x800 so a single addi loads their address.
+	// RX v2 tier-b: one NRZI ACK bit slot (shared by the pipelined-CRC
+	// ACK streamer's two slot bodies; ra is the link register).
+ack_tx_bit:
+	c.mv a0, a2
+	c.andi a0, 1
+	c.addi a0, -1                // 0 -> toggle / 1 -> hold
+	and a0, a0, t1
+	c.xor s1, a0
+	c.sw s1, 16(a5)
+	c.srli a2, 1
+	c.jr ra
+
+	// Shared D+/D- output-mode computation (usb_send_data prologue and
+	// the tier-b ACK streamer). Returns a5 = GPIO base, a4 = CFGLR word
+	// for push-pull outputs; clobbers s1; link register t1.
+tx_pins_cfg:
+	la a5, USB_GPIO_BASE
+	c.lw a4, CFGLR_OFFSET(a5)
+	li s1, ~((0b1111<<(USB_PIN_DP*4)) | (0b1111<<(USB_PIN_DM*4)))
+	and a4, s1, a4
+	li s1, ((0b0010<<(USB_PIN_DP*4)) | (0b0010<<(USB_PIN_DM*4)))
+	or a4, s1, a4
+	c.jr t1
+
+	// RX v2 post-SE0 CRC nibble table (reflected poly 0xA001).
+	// Kept below 0x800 so a single addi loads its address.
 .balign 2
-rx_crc16_tbl: // poly 0xA001
+rx_crc16_tbl:
 	.hword 0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401
 	.hword 0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400
 #endif
@@ -790,7 +893,7 @@ handle_se0_keepalive:
 	// Make sure we aren't in left field.
 	li a5, 4000
 	bge a2, a5, ret_from_se0
-	li a5, -4000
+	neg a5, a5                   // a5 still == 4000 here; -4000 = -(4000)
 	blt a2, a5, ret_from_se0
 
 	c.lw a1, SE0_WINDUP_OFFSET(a4) // load windup se0_windup
@@ -803,19 +906,20 @@ handle_se0_keepalive:
 	// 0x40021000 = RCC.CTLR
 	la a4, 0x40021000
 	lw a0, 0(a4)
-	srli a2, a0, 3 // Extract HSI Trim.
-	andi a2, a2, 0b11111
-	li a5, 0xffffff07  
+	// (the existing HSITRIM read into a2 was dead - overwritten below
+	//  with an absolute trim - so it is dropped for flash budget.)
+	li a5, 0xffffff07
 	and a0, a0, a5	// Mask off non-HSI
 
-	// Decimate windup - use as HSIrim.
+	// Decimate windup - use as HSIrim. Compute in a1 so the shift is
+	// rd==rs1 and compresses (a1 is dead after this).
 	neg a1, a1
-	srai a2, a1, 9
-	addi a2, a2, 16  // add HSI offset.
+	srai a1, a1, 9
+	addi a1, a1, 16  // add HSI offset.
 
 	// Put trim in place in register.
-	slli a2, a2, 3
-	or a0, a0, a2
+	slli a1, a1, 3
+	or a0, a0, a1
 	sw a0, 0(a4)
 
 	j ret_from_se0
@@ -838,6 +942,13 @@ usb_send_data:
 	sw	s0, 0(sp)
 	sw	s1, 4(sp)
 
+#if defined( CH32V003 )
+	jal t1, tx_pins_cfg          // a5=GPIO, a4=output CFGLR word
+	li s1, (1<<USB_PIN_DP) | (1<<(USB_PIN_DM+16))
+	c.sw s1, BSHR_OFFSET(a5)
+	//00: Universal push-pull output mode
+	c.sw a4, CFGLR_OFFSET(a5)
+#else
 	la a5, USB_GPIO_BASE
 
 	// ASAP: Turn the bus around and send our preamble + token.
@@ -855,6 +966,7 @@ usb_send_data:
 
 	//00: Universal push-pull output mode
 	c.sw a4, CFGLR_OFFSET(a5)
+#endif
 
 	li t1, (1<<USB_PIN_DP) | (1<<(USB_PIN_DM+16)) | (1<<USB_PIN_DM) | (1<<(USB_PIN_DP+16));
 
@@ -876,7 +988,11 @@ done_poly_check:
 	// t0 is our polynomial
 	// a2 is our running CRC.
 	// a3 is our token.
+#if !defined( CH32V003 )
+	// (RX v2 uses no debug tick; x4/tp is never dereferenced, so this
+	//  dead TIM1 address load is dropped on CH32V003 for flash budget.)
 	DEBUG_TICK_SETUP
+#endif
 
 	c.li a4, 6 // reset bit stuffing.
 	c.li a1, 15 // 15 bits.
@@ -1066,6 +1182,8 @@ no_really_done_sending_data:
 
 	nx6p3delay( 7, a3 );
 
+tx_line_release: // (RX v2 tier-b ACK path re-enters here on bad CRC:
+	             //  line back to J and pins to input WITHOUT an EOP)
 	li s1, (1<<(USB_PIN_DM)) | (1<<(USB_PIN_DP+16))
 	c.sw s1, BSHR_OFFSET(a5)
 
@@ -1080,7 +1198,12 @@ no_really_done_sending_data:
 
 	lw	s0, 0(sp)
 	lw	s1, 4(sp)
+#if !defined( CH32V003 )
+	// (dropped on CH32V003: x4 is dead, and the tier-b ACK path reuses
+	//  this tail carrying byte_count in x4/tp - this lw must NOT clobber
+	//  it before the continuation reads the length.)
 	RESTORE_DEBUG_MARKER( 8 )
+#endif
 	addi	sp,sp,16
 	ret
 
