@@ -385,6 +385,13 @@ void usb_pid_handle_data( uint32_t this_token, uint8_t * data, uint32_t which_da
 	int cep = ist->current_endpoint;
 	struct usb_endpoint * e = &ist->eps[cep];
 
+#if !defined(CH32V00x) || !CH32V00x
+	// (tier b, CH32V003) The ACK is now transmitted by the ISR dispatch
+	// itself, pipelined with the CRC16 check (see rv003usb.S); by the time
+	// this handler runs the ACK is already on the wire. Parse at leisure -
+	// the next host token is >= ~35 us away.
+#endif
+
 	// Alrady received this packet.
 	if( e->toggle_out != which_data )
 	{
@@ -474,8 +481,13 @@ void usb_pid_handle_data( uint32_t this_token, uint8_t * data, uint32_t which_da
 	}
 just_ack:
 	{
+#if defined(CH32V00x) && CH32V00x
 		//Got the right data.  Acknowledge.
 		usb_send_data( 0, 0, 2, 0xD2 ); // Send ACK
+#else
+		// (tier b, CH32V003) ACK already emitted by the ISR dispatch,
+		// pipelined with the CRC16 check in rv003usb.S (idea 4.6).
+#endif
 	}
 	return;
 }
