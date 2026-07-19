@@ -62,23 +62,30 @@ EXTI7_0_IRQHandler:
 	sw	s1, 28(sp)
 
 	SAVE_DEBUG_MARKER( 48 );
+#if !defined( CH32V003 )
 	DEBUG_TICK_SETUP
+#endif
 	c.lw a1, INDR_OFFSET(a5)
 	c.andi a1, USB_DMASK;
 
 	// Finish jump to se0
 	c.beqz a0, handle_se0_keepalive
 
+#if defined( CH32V003 )
+	// RX v2: compact first-edge qualifier (8 bytes vs the old 7x unroll):
+	// wait for the first transition so the preamble sampling phase is
+	// anchored to a sync edge (a free-running phase falsely detects the
+	// sync-terminating "KK" pair inside a single bit cell). Same
+	// stuck-line behavior as preamble_loop itself (an edge triggered
+	// this IRQ, more sync edges follow within 1-2 bit times).
+9:	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; beq a0, a1, 9b
+#else
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
-#if !defined( CH32V003 )
-	// (One iteration dropped on CH32V003 for flash budget: an edge in the
-	// removed window takes the timeout path and preamble_loop re-syncs;
-	// validated across all 64 start phases by the eye sweep.)
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 #endif
 	c.j syncout
@@ -101,7 +108,13 @@ syncout:
 	// The preamble loop should try to make it earlier.
 .balign 4
 preamble_loop:
+#if defined( CH32V003 )
+	// RX v2: x4/tp is not loaded in the ISR prologue anymore (debug tick
+	// setup removed); keep the 2 cycles with a harmless load instead.
+	c.lwsp s0, 0(sp)
+#else
 	DEBUG_TICK_MARK
+#endif
 	c.lw a0, INDR_OFFSET(a5);
 	c.andi a0, USB_DMASK;
 	c.beqz a0, done_usb_message // SE0 here?
@@ -127,7 +140,9 @@ done_preamble:
 	// 16-byte temporary buffer at 56+sp
 
 	// XXX TODO: Do one byte here to determine the header byte and from that set the CRC.
+#if !defined( CH32V003 )
 	c.li s1, 8
+#endif
 
 	// This is the first bit that matters.
 	c.li s0, 6 // 1 runs.
@@ -160,10 +175,21 @@ done_preamble:
 
 .balign 4
 packet_type_loop:
+#if defined( CH32V003 )
+	// RX v2 (idea 4.4): no dedicated PID loop - the unified bit slot
+	// below receives the PID byte too (it lands in buf[0] via the
+	// normal end-of-byte store, in NATURAL bit order thanks to the
+	// srli accumulator; the SE0 dispatch compares natural PID values).
+	// Per-transition resync is thereby active from the first PID bit
+	// (idea 5.3: the sync "pocket" closes the preamble-lock jitter
+	// before any payload bit is sampled).
+	addi  t2, sp, DATA_PTR_OFFSET
+	c.li s1, 13                  // byte budget: PID + 8 data + 2 CRC + 2
+	c.li a3, 8                   // bit-of-byte counter
+	c.li a4, 0                   // first-slot resync classify neutral
+	c.j bit_process
+#else
 	// Up here to delay loop a tad, and we need to execute them anyway.
-	// TODO: Maybe we could further sync bits here instead of take up time?
-	// I.e. can we do what we're doing above, here, and take less time, but sync
-	// up when possible.
 	li a3, 0xffff // Starting CRC of 0.   Because USB doesn't respect reverse CRCing.
 	li a4, 0xa001
 	addi  t2, sp, DATA_PTR_OFFSET //rv003usb_internal_data
@@ -179,9 +205,6 @@ packet_type_loop:
 	// a0 = 00 for 1 and 11 for 0
 
 	// No CRC for the header.
-	//c.srli a0, USB_PIN_DP
-	//c.addi a0, 1 // 00 -> 1, 11 -> 100
-	//c.andi a0, 1 // If 1, 1 if 0, 0
         c.nop
         seqz a0, a0
 
@@ -196,12 +219,94 @@ packet_type_loop:
 	c.addi s0, -1
 	c.addi s1, -1
 	c.bnez s1, packet_type_loop
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////	
 
 	// XXX Here, figure out CRC polynomial.
 
+#if defined( CH32V003 )
+	// ================== RX v2 (CH32V003 only) ==========================
+	// Branchless unified bit slot (no zero/one path split), CRC moved
+	// out of the slot (nibble tables after SE0: idea 4.1a, legalized by
+	// the ACK-first change in bootloader.c: idea 4.6), per-transition
+	// bang-bang resync (idea 5.1; PRE/MAIN early-warning scheme proven
+	// by the 5.2 stuff-slot patch, which this subsumes), split byte
+	// counter (idea 4.3: bit-of-byte in a3, byte budget in s1).
+	//
+	// Register map in the bit loop:
+	//   a0 temp/MAIN sample   a1 last line state (masked)
+	//   a2 shift word         a3 bit-of-byte down-counter (8..1)
+	//   a4 PRE sample (raw)   a5 GPIO base
+	//   s0 run-of-ones ctr    s1 byte budget    t2 write ptr
+	//
+	// Slot ledger (1ws flash, E = nominal cell start, entry c.j retires
+	// E+2 = MAIN lw start, the same sample instant as v1):
+	//   healthy: ... c.beqz a4 taken E+28, PRE lw E+28..30, c.j -> E+34:
+	//            32 cycles bit-exact;
+	//   resync (edge between PRE and MAIN: grid early): +2 -> E+36;
+	//   EOB: taken E+26, falls through into bit_process at E+34;
+	//   stuff paths are two-cell (64 nominal / 66 corrected).
+rx_eob:                              // entry (c.beqz a3 taken) retires E+26
+	sb a2, 0(t2)                 // E+28 (bit already merged before branch)
+	c.addi t2, 1                 // E+29
+	c.addi a3, 8                 // E+30 reload bit counter (was 0)
+	c.addi s1, -1                // E+31
+	c.beqz s1, done_usb_message  // E+32 buffer budget exhausted
+	c.lw a4, INDR_OFFSET(a5)     // PRE (starts E+32, at the cell boundary)
+	// falls through: MAIN starts E+34. A stuffed bit after the byte is
+	// handled by the next slot's own early s0 check (regularized).
+bit_process:
+	c.lw a0, INDR_OFFSET(a5)     // MAIN sample (starts E+2)
+	c.andi a0, USB_DMASK
+	c.beqz a0, se0_complete      // SE0
+	c.beqz s0, rx_stuff          // THIS cell is the stuffed bit: it has
+	                             // MAIN in a0 and PRE in a4 already
+	c.xor a0, a1                 // toggle (0 => bit is 1)
+	c.xor a1, a0                 // a1 = new line state
+	c.andi a4, USB_DMASK
+	c.xor a4, a1                 // 0 => PRE saw new level (healthy/one-bit)
+	seqz a0, a0                  // bit value
+	c.srli a2, 1
+	c.addi a0, -1                // 0 (one) / -1 (zero)
+	c.or s0, a0                  // branchless stuff counter (ptl scheme):
+	c.andi s0, 7                 //   zero -> s0 = 6; one -> s0 - 1
+	c.addi s0, -1
+	c.addi a0, 1                 // bit value back (1 = one, 0 = zero)
+	c.slli a0, 7                 // 0x80 / 0: bit into position 7
+	c.or a2, a0                  // bit into the shift word
+	c.addi a3, -1
+	c.beqz a3, rx_eob            // end of byte (starts E+22, taken -> E+26)
+	c.beqz a4, 1f                // healthy -> nominal tail (taken -> E+28)
+	c.lwsp a0, 0(sp)             // resync +2: grid early, stretch
+	c.lwsp a0, 0(sp)             // (2-cycle fillers, a0 dead), then falls
+	c.lwsp a0, 0(sp)             // into the shared tail
+1:	c.lw a4, INDR_OFFSET(a5)     // PRE (healthy: starts E+28, boundary-4)
+	c.j bit_process              // retires E+34 (healthy) / E+36 (corr +2)
+
+rx_stuff:                            // entry (early c.beqz s0 taken) retires
+	c.xor a0, a1                 // E+10; a0 = masked MAIN, a4 = PRE raw
+	c.xor a1, a0                 // a1 = new line state
+	c.beqz a0, done_usb_message  // stuffed bit must have an edge
+	c.andi a4, USB_DMASK
+	c.xor a4, a1                 // 0 => edge was already at PRE: healthy
+	c.li s0, 6                   // reset run-of-ones counter
+	c.beqz a4, 8f                // healthy (taken -> E+20)
+	c.lwsp a0, 0(sp)             // resync +4 filler (grid early): the
+	c.lwsp a0, 0(sp)             // stuffed edge is guaranteed, so take a
+	c.lwsp a0, 0(sp)             // bigger step than the ordinary zero-bit
+	c.nop                        // +2 (all-ones traffic corrects only
+	                             // every 7th bit: authority 4/224)
+8:	c.lwsp a0, 0(sp)
+	c.lwsp a0, 0(sp)
+	c.lwsp a0, 0(sp)
+	c.lwsp a0, 0(sp)
+	c.lw a4, INDR_OFFSET(a5)     // PRE (healthy: starts E+28)
+	c.j bit_process              // retires E+34 (healthy) / E+36 (corr):
+	                             // the stuffed cell renders one normal
+	                             // 32-cycle slot, dt across = 64 exact
+#else
 	li s1, (USB_BUFFER_SIZE*8) // # of bits we culd read.
 
 	// WARNING: a0 is bit-wise backwards here.
@@ -217,7 +322,7 @@ packet_type_loop:
 	// (0) for setup or PARTIAL CRC.
 	// Careful:  This has to take a constant amount of time either way the branch goes.
 	c.beqz a0, data_crc
-	c.li a4, 0x14	
+	c.li a4, 0x14
 	c.li a3, 0x1e
 	.word 0x00000013 // nop, for alignment of data_crc.
 data_crc:
@@ -384,12 +489,18 @@ not_is_end_of_byte_and_bit_stuffed:
 
 	c.bnez s1, bit_process // + 4 cycles
 #endif
+#endif /* CH32V003 RX v2 */
 
 .balign 4
 se0_complete:
 	// This is triggered when we finished getting a packet.
+#if defined( CH32V003 )
+	c.addi a3, -8               // bit-of-byte counter must be full (8)
+	c.bnez a3, done_usb_message // mid-byte SE0 -> not a whole byte count
+#else
 	andi a0, s1, 7; // Make sure we received an even number of bytes.
 	c.bnez a0, done_usb_message
+#endif
 
 
 
@@ -418,7 +529,11 @@ se0_complete:
 #endif
 
 	// For ACK don't worry about CRC.
+#if defined( CH32V003 )
+	addi a5, a0, -0xD2           // RX v2 stores NATURAL bit order: ACK = 0xD2
+#else
 	addi a5, a0, -0b01001011
+#endif
 
 	RESTORE_DEBUG_MARKER(48) // restore x4 for whatever in C land.
 
@@ -433,12 +548,30 @@ se0_complete:
 	c.beqz a5, usb_pid_handle_ack
 
 	// Next, check for tokens.
+#if defined( CH32V003 )
+	// RX v2: the slot loop no longer computes CRC; route by PID class
+	// ((reversed_pid & 0x0C) == 0 for DATA0/DATA1) and check the CRC
+	// here from the buffer (idea 4.1a).
+	andi s1, a0, 3               // natural PID: data PIDs have low bits 11
+	c.addi s1, -3
+	c.beqz s1, crc_for_tokens_would_be_bad_maybe_data
+may_be_a_token:
+	// RX v2 accepts tokens WITHOUT the CRC5 check (flash budget): the
+	// PID byte is self-checking (low nibble must complement the high
+	// one, enforced by the exact-match dispatch), only the addr/ep
+	// field is unprotected - the same trade-off V-USB ships with.
+	// A corrupted addr is rejected by the address filter below; a
+	// corrupted ep is bounded by the ENDPOINTS check.
+	// Do token-y things.
+	XW_C_LHU( a2, a1, 0 )
+#else
 	c.bnez a3, crc_for_tokens_would_be_bad_maybe_data
 may_be_a_token:
 	// Our CRC is 0, so we might be a token.
 
 	// Do token-y things.
 	XW_C_LHU( a2, a1, 0 )
+#endif
 	andi a0, a2, 0x7f // addr
 	c.srli a2, 7
 	c.andi a2, 0xf    // endp
@@ -449,29 +582,81 @@ may_be_a_token:
 	XW_C_LBU(s0, a4, MY_ADDRESS_OFFSET_BYTES);	//	lbu s0, MY_ADDRESS_OFFSET_BYTES(a4)
 	bne s0, a0, done_usb_message // addr != 0 && addr != ours.
 yes_check_tokens:
+#if defined( CH32V003 )
+	addi a5, a5, (0xD2-0xE1)     // natural: OUT = 0xE1
+	c.beqz a5, usb_pid_handle_out
+	addi a5, a5, (0xE1-0x69)     // IN = 0x69
+	c.beqz a5, usb_pid_handle_in
+	addi a5, a5, (0x69-0x2D)     // SETUP = 0x2D
+	c.beqz a5, usb_pid_handle_setup
+#else
 	addi a5, a5, (0b01001011-0b10000111)
 	c.beqz a5, usb_pid_handle_out
 	c.addi a5, (0b10000111-0b10010110)
 	c.beqz a5, usb_pid_handle_in
 	c.addi a5, (0b10010110-0b10110100)
 	c.beqz a5, usb_pid_handle_setup
+#endif
 
 	c.j done_usb_message_in
 
 	// CRC is nonzero. (Good for Data packets)
 crc_for_tokens_would_be_bad_maybe_data:
+#if defined( CH32V003 )
+	// Data packet: table CRC16 (idea 4.1a) over payload+CRC bytes;
+	// residual 0xB001 (init 0xFFFF, no xorout - same invariant as the
+	// old in-slot computation). ~26 cycles/byte, <=10 bytes.
+	sub s0, t2, a1               // byte count (excl. PID)
+	blez s0, done_usb_message_in // guard: SE0 right after PID
+	c.mv a2, a1
+	c.lui a3, 0x10
+	c.addi a3, -1                // 0xFFFF
+	addi t1, zero, %lo(rx_crc16_tbl) // table via t1: a4 (ist) stays live
+7:	XW_C_LBU(s1, a2, 0)          // per byte: 2 nibbles via inner loop
+	c.addi a2, 1
+	c.li t0, 2
+8:	c.mv a0, s1
+	c.xor a0, a3
+	c.andi a0, 15
+	c.slli a0, 1
+	c.add a0, t1
+	XW_C_LHU(a0, a0, 0)
+	c.srli a3, 4
+	c.xor a3, a0
+	c.srli s1, 4
+	c.addi t0, -1
+	bnez t0, 8b                  // t0 is not a compressed reg: 32-bit form
+	c.addi s0, -1
+	c.bnez s0, 7b
+	lui s0, 0xb
+	c.addi s0, 1                 // 0xB001
+	c.sub a3, s0
+	c.bnez a3, done_usb_message_in
+	sub a3, t2, a1 //a3 = # of bytes read..
+	c.addi a3, 1
+#else
 	li s0, 0xb001  // UGH: You can't use the CRC16 in reverse :(
 	c.sub a3, s0
 	c.bnez a3, done_usb_message_in
 	// Good CRC!!
 	sub a3, t2, a1 //a3 = # of bytes read..
 	c.addi a3, 1
+#endif
+#if defined( CH32V003 )
+	c.addi a5, (0xD2-0xC3)       // natural: DATA0 = 0xC3
+	c.li a2, 0
+	c.beqz a5, usb_pid_handle_data
+	addi a5, a5, (0xC3-0x4B)     // DATA1 = 0x4B
+	c.li a2, 1
+	c.beqz a5, usb_pid_handle_data
+#else
 	addi a5, a5, (0b01001011-0b11000011)
 	c.li a2, 0
 	c.beqz a5, usb_pid_handle_data
 	c.addi a5, (0b11000011-0b11010010)
 	c.li a2, 1
 	c.beqz a5, usb_pid_handle_data
+#endif
 
 done_usb_message:
 done_usb_message_in:
@@ -504,6 +689,15 @@ interrupt_complete:
 	lw	a5, 20(sp)
 	addi	sp,sp,80
 	mret
+
+#if defined( CH32V003 )
+	// RX v2 post-SE0 CRC nibble tables (reflected polynomials).
+	// Kept below 0x800 so a single addi loads their address.
+.balign 2
+rx_crc16_tbl: // poly 0xA001
+	.hword 0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401
+	.hword 0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // High level functions.
