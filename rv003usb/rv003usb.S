@@ -75,7 +75,12 @@ EXTI7_0_IRQHandler:
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
+#if !defined( CH32V003 )
+	// (One iteration dropped on CH32V003 for flash budget: an edge in the
+	// removed window takes the timeout path and preamble_loop re-syncs;
+	// validated across all 64 start phases by the eye sweep.)
 	c.lw a0, INDR_OFFSET(a5); c.andi a0, USB_DMASK; bne a0, a1, syncout
+#endif
 	c.j syncout
 syncout:
 	sw	s0, 24(sp)
@@ -127,7 +132,7 @@ done_preamble:
 	// This is the first bit that matters.
 	c.li s0, 6 // 1 runs.
 
-	c.nop; 
+	c.nop;
 
 	// 8 extra cycles here cause errors.
 	// -5 cycles is too much.
@@ -299,6 +304,63 @@ handle_bit_stuff:
 	// We want to wait a little bit, then read another byte, and make
 	// sure everything is well, before heading back into the main loop
 	// Debug blip
+#if defined( CH32V003 )
+	// In-packet resync (idea 5.2): a stuffed bit GUARANTEES a wire
+	// transition at its cell boundary - use it to retime the sampling
+	// grid. Two looks at the wire:
+	//   PRE sample (c.lw s0, 7 cycles before MAIN; s0 is dead, it just
+	//   hit 0) and MAIN sample (same instant as the old code, E+2).
+	//   - edge already present at PRE  -> phase healthy: nominal slot
+	//     (stuffed double-slot = 64 cycles, 0 ppm behavior unchanged);
+	//   - edge between PRE and MAIN    -> our grid samples too close to
+	//     the cell boundary (drifting early relative to the host, i.e.
+	//     the DEVICE runs fast / host slow): stretch this slot +2 to
+	//     re-center. Self-centering: also fires a few times at packet
+	//     start when the preamble lock left the grid off-center.
+	//   - no edge even at MAIN         -> line error, drop (old behavior).
+	// The correction engages ~7 cycles BEFORE a data bit would be
+	// double-sampled - that early warning is what makes it effective;
+	// checking at the sample point itself would fire only when data
+	// bits are already dying (they occur 6x more often than stuffs).
+	// Without this, clock error accumulates over the whole packet and
+	// the worst-case all-ones payload dies at ~+5000 ppm.
+	//
+	// Cycle ledger (CH32V003, 1ws flash; E = nominal stuffed-cell start;
+	// entry c.beqz s0 retires E-8; both fork paths rejoin at E+2):
+	//   PRE lw starts E-5; MAIN lw starts E+2;
+	//   healthy tail: final c.bnez s1 retires E+32 -> dt = 64 exact;
+	//   correct tail: retires E+34 -> dt = 66 (+2 per engagement).
+	// (Debug tick mark dropped here for the 1920-byte budget.)
+	c.addi s1, -1
+	andi a0, s1, 7
+	c.lw s0, INDR_OFFSET(a5)     // PRE sample (starts E-5)
+	c.bnez a0, not_is_end_of_byte_and_bit_stuffed
+	sb a2, 0(t2)                 // end-of-byte: store; path balanced
+	.word 0x00138393             // with the taken fork (5 == 1+2+2)
+not_is_end_of_byte_and_bit_stuffed:
+	c.lw a0, INDR_OFFSET(a5)     // MAIN sample (starts E+2)
+	c.andi a0, USB_DMASK
+	c.beqz a0, se0_complete
+	c.andi s0, USB_DMASK
+	c.xor s0, a1                 // s0 = PRE toggle vs old line state
+	c.xor a0, a1
+	c.xor a1, a0                 // recover a1 (new line state)
+	c.beqz a0, done_usb_message  // no transition at MAIN -> real error
+	c.bnez s0, 8f                // edge already at PRE -> healthy
+	// correct (+2): edge in (PRE, MAIN]: grid too early, stretch
+	c.li s0, 6
+	c.li a0, 3
+2:	c.addi a0, -1
+	c.bnez a0, 2b
+	c.bnez s1, bit_process       // retires E+34: dt = 66
+8:	c.li s0, 6
+	c.lwsp a0, 0(sp)             // 2-cycle filler (a0 is dead)
+	c.nop
+	c.li a0, 2
+3:	c.addi a0, -1
+	c.bnez a0, 3b
+	c.bnez s1, bit_process       // retires E+32: dt = 64
+#else
 	HANDLE_NEXT_BYTE(not_is_end_of_byte_and_bit_stuffed, bnez)
 	HANDLE_EOB_YES
 
@@ -321,6 +383,7 @@ not_is_end_of_byte_and_bit_stuffed:
 	nx6p3delay( 2, a0 )
 
 	c.bnez s1, bit_process // + 4 cycles
+#endif
 
 .balign 4
 se0_complete:
@@ -345,14 +408,26 @@ se0_complete:
 	// 1101 => 10110100 => SETUP    (OK)
 
 	// a0 contains first 4 bytes.
+#if defined( CH32V003 )
+	// fw links at 0x00000000 and fits in 2K: the absolute address fits
+	// a single addi (4 bytes vs la's auipc+addi 8) - size headroom for
+	// the RX resync block above.
+	addi ra, zero, %lo(done_usb_message_in) // Common return address for all function calls.
+#else
 	la ra, done_usb_message_in // Common return address for all function calls.
+#endif
 
 	// For ACK don't worry about CRC.
 	addi a5, a0, -0b01001011
 
 	RESTORE_DEBUG_MARKER(48) // restore x4 for whatever in C land.
 
+#if defined( CH32V003 )
+	lui a4, %hi(rv003usb_internal_data)     // 6 bytes vs la's 8 (addi
+	addi a4, a4, %lo(rv003usb_internal_data) // compresses to c.addi)
+#else
 	la a4, rv003usb_internal_data
+#endif
 
 	// ACK doesn't need good CRC.
 	c.beqz a5, usb_pid_handle_ack
@@ -502,7 +577,12 @@ handle_se0_keepalive:
 	// 1ms tick.
 
 	la  a0, SYSTICK_CNT
+#if defined( CH32V003 )
+	lui a4, %hi(rv003usb_internal_data)
+	addi a4, a4, %lo(rv003usb_internal_data)
+#else
 	la a4, rv003usb_internal_data
+#endif
 	c.lw a1, LAST_SE0_OFFSET(a4) //last cycle count   last_se0_cyccount
 	c.lw a2, 0(a0) //this cycle count
 	c.sw a2, LAST_SE0_OFFSET(a4) //store it back to last_se0_cyccount
