@@ -1670,32 +1670,21 @@ pre_and_tok_send_inner_loop:
 		* If it is 0, we can reset our bit stuffing index.
 	*/
 
-	// a3 is now the lsb of s0 (the 'next bit' to read out)
+	// TX v2 (idea 6.1): branchless NRZI slot. The preamble+token carry no
+	// bit stuffing (SYNC+PID+token never runs 6 ones), so the old a4 stuff
+	// counter here was vestigial and is dropped. The BSHR store lands on
+	// the SAME slot cycle for every bit value - zero front jitter (the old
+	// zero/one split stored 8 cycles apart -> 28/36 alternation).
 	c.mv a3, s0
-	c.srli s0, 1 // Shift down into the next bit.
-	c.andi a3, 1
-	// If a3 is 0, we should FLIP
-	// if a3 is 1, we should NOT flip.
-
-	c.addi a4, -1
-	c.bnez a3, pre_and_tok_send_one_bit
-//pre_and_tok_send_one_bit:
-//Send 0 bit. (Flip)
-	// Flip s1 (our bshr setting) by xoring it.
-	// 10.....01
-	// 11.....11 (xor with)
-	// 01.....10
-	xor s1, s1, t1
-	c.li a4, 6 // reset bit stuffing.
-	// DO NOT flip.  Allow a4 to increment.
-// Deliberately unaligned for timing purposes.
-.balign 4
-pre_and_tok_send_one_bit:
-	sw s1, BSHR_OFFSET(a5)
-	//Bit stuffing doesn't happen.
+	c.srli s0, 1
+	c.andi a3, 1                 // a3 = bit
+	c.addi a3, -1                // bit0 -> -1 (flip) / bit1 -> 0 (hold)
+	and a3, a3, t1               // mask = (bit-1) & flip_word
+	c.xor s1, a3
+	sw s1, BSHR_OFFSET(a5)       // <-- fixed store cycle, every bit
 	c.addi a1, -1
 	c.beqz a1, pre_and_tok_done_sending_data
-	nx6p3delay( 2, a3 );	c.nop;             // Free time!
+	nx6p3delay( 2, a3 )          // period trim to the 32-cycle grid
 	c.j pre_and_tok_send_inner_loop
 .balign 4
 pre_and_tok_done_sending_data:
@@ -1746,6 +1735,13 @@ load_next_byte:
 	//lb s0, 0(a0)
 	//	.long 0x00150513 // addi a0, a0, 1  (For alignment's sake)
 	c.addi a0, 1
+	// TX v2 stage-2: the byte-boundary path reaches send_inner_loop via
+	// one taken branch (beqz->here) + the byte load, whereas the interior
+	// path takes two taken jumps (j 1f; j send_inner_loop) as its delay -
+	// so the byte-boundary slot ran 1 cycle short (31) and the next slot
+	// realigned to 33. These nops (only executed on the byte-boundary
+	// fall-through) pad the load path back onto the 32-cycle grid.
+	c.nop
 send_inner_loop:
 	/* High-level:
 		* extract the LSB from s0
