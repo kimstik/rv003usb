@@ -6,7 +6,7 @@
 ## Фаза 0 — сбор информации (текущая)
 - [ ] chip_info.md — верифицированные факты по К1921ВГ015 (агент: web-research)
 - [ ] stack_portability.md — инвентарь чип-зависимостей rv003usb + bootloader (агент: code-analysis)
-- [ ] branch_notes.md — уроки порта py32 + анализ rx-tx-branchless улучшений (агент: branch-analysis)
+- [x] branch_notes.md — уроки порта py32 + анализ rx-tx-branchless улучшений (готово; вывод: база порта — master, branchless = cycle-exact артефакт CH32V003)
 - [ ] PLAN.md — детальный план порта (пишет оркестратор после ревью трёх файлов выше)
 
 ## Правила
