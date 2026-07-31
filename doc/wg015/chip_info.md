@@ -100,6 +100,20 @@ From habr.com/ru/articles/883220/ (community review, Feb 2025):
 - Undocumented GPIO `DIFF` register; altfunc numbering poorly documented.
 Forum thread (more field experience): electronix.ru/forum/topic/200020-k1921vg015-kto-nibud-uzhe-polzovalsya/ — **not yet mined, TODO**.
 
+## CORRECTIONS after deep-dive (2026-07-31, see doc/wg015/research/*)
+
+Deep-dive over РП 19.02.2025 + official errata Rev.4 (25.07.2025) supersedes items above:
+1. **LAT@48MHz = 1, not 3** (РП табл. 7.1: ≤60 MHz→1, ≤30→0; reset=1). SDK's LAT=3+CEN=1 is unexplained conservatism (research_flash.md §2).
+2. Flash prefetch documented: 128-bit lines, 2 buffers, hits «мгновенно», miss = LAT waits; **no disable bit in РП**; CEN/CFLUSH exist only in SDK/SVD, semantics unknown. Plus **undocumented 2 KB core I-cache**. No fixed-cycle fetch guarantee anywhere (research_flash.md §3).
+3. **No read-while-write**: fetches during program/erase return garbage silently (РП 7.1) — flasher + any live ISR must be in RAM (research_flash.md §4).
+4. **HW USB officially broken** (errata №3,4: no internal D+ pull-up, only CEP+EP4 usable) — bitbang is the pragmatic path, not a stunt (research_errata.md §2a).
+5. PLL: integer-mode 48.000 MHz configs verified legal for HSE 10/12/16/20/24/25 (VCO 200–1600 allowed); **fREF min 10 MHz — 8 MHz crystal can't feed PLL**; the "fractional jitter ≤ FIN period" quote is about the CAN divider, NOT SYSPLL (research_clocks.md §1-2). SDK-implied board crystal = 16 MHz.
+6. GPIO: input always behind **2-clk synchronizer** (SYNCSET=1 adds 2 more; base not bypassable); **no Schmitt trigger** (forum p.17); INTSTATUS W1C; all ports → PLIC line 5; MASKLB masked *write* documented, masked read only inferred (research_gpio.md).
+7. PLIC: claim = read MICC, complete = write MICC; **gateway blocks same-source re-request until complete** — free "never preempt" guarantee; clear INTSTATUS before MICC complete (research_core_irq.md §4).
+8. Core: RV32IMC ops = 1 cycle (РП §8), MUL=2, DIV=2..16, **CSR ops drain the pipeline**; rdcycle available. Taken-branch/load real cost still unmeasured.
+9. Not 5V-tolerant (abs max VCC+0.6, ≤5 s). IO 4 mA. Errata №1: RTC_REG[14] corrupt — don't use for boot flag.
+10. REFSEL contradiction: РП fig. 4.1 implies REFSEL=1 for HSE→PLL, SDK never sets it and works — resolve on hardware (research_clocks.md §1.2).
+
 ## UNVERIFIED / TODO
 
 - Cycle timing of BM-310S6 (branch/load/store, GPIO store latency over AHB) — no public table; measure with `mcycle` on hardware.
