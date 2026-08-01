@@ -28,8 +28,11 @@ SIZE    := $(PREFIX)size
 # rv32imc_zicsr, no F (эррата №5 stays out of reach); LTO explicitly OFF for
 # asm layout determinism (cycle-counted code must not be reshuffled).
 ARCHFLAGS := -march=rv32imc_zicsr -mabi=ilp32
+# Target select must come from the command line, not only the shim header:
+# usb_config.h is included BEFORE ch32fun.h in rv003usb.c (line 7 vs 10).
+CFLAGS  += -DWG015=1
 CFLAGS  += -Os -g -Wall $(ARCHFLAGS) \
-	-static -nostdlib -ffreestanding -fno-lto \
+	--specs=picolibc.specs -nostartfiles -static -ffreestanding -fno-lto \
 	-ffunction-sections -fdata-sections
 
 # Include order matters: this directory FIRST so the shim ch32fun.h wins
@@ -41,6 +44,8 @@ INCLUDES := -I$(WG015_DIR) -I. -I$(RV003USB_DIR) -I$(RV003USB_DIR)/../lib
 TIMECRIT_TCM ?= 0
 ifeq ($(TIMECRIT_TCM),1)
 LDSCRIPT ?= $(WG015_DIR)/wg015_timecrit_tcm.ld
+# far dispatch in rv003usb.S (z8): .timecrit in TCM, C layer in flash
+CFLAGS += -DWG015_TIMECRIT_TCM=1
 else
 LDSCRIPT ?= $(WG015_DIR)/wg015_flash.ld
 endif
@@ -55,6 +60,7 @@ SOURCES := $(TARGET).c \
 	$(RV003USB_DIR)/rv003usb.c \
 	$(RV003USB_DIR)/rv003usb.S \
 	$(WG015_DIR)/startup_wg015.S \
+	$(WG015_DIR)/wg015_stdio_stub.c \
 	$(ADDITIONAL_C_FILES)
 
 WG015_HEADERS := $(WG015_DIR)/ch32fun.h $(WG015_DIR)/K1921VG015_min.h
