@@ -33,10 +33,16 @@
       scratchpad/bitcheck): V003 сборка БИТ-ИДЕНТИЧНА, V00x сборка БИТ-ИДЕНТИЧНА,
       WG015-ветка ассемблируется, .timecrit = 960 Б (<< 2К I-cache — H1 усилена),
       кодировки MASKLB/rdcycle/OUTEN/INTSTATUS проверены дизассемблером.
-- [ ] Скелет таргета rv003usb/wg015/ (агент в фоне: шим ch32fun.h, K1921VG015_min.h,
-      startup, ld×2, Makefile.wg015)
-- [ ] TUNE-паддинги: леджер слотов WG015 (первый статический проход) — после скелета
-- [ ] C-слой: usb_setup WG015-ветка, REBOOT_TO_BOOTLOADER, demo_hidapi конфиг
+- [x] Скелет таргета rv003usb/wg015/ (шим ch32fun.h, K1921VG015_min.h с 20 static_assert,
+      startup с PLL-таблицей 6 кварцев, ld×2 c REGION_ALIAS-переключением, Makefile.wg015) —
+      машинно проверен (clang+lld+GNU ld), реальный шим ассемблирует параметризованный .S
+- [x] C-слой (коммит 62a3452): usb_setup WG015-ветка (RCU/пины/mtvec/PLIC prio7/DPU),
+      шов #4 REBOOT_TO_BOOTLOADER (RTC_REG[0] one-shot + RSTSYS, контракт-значения в шиме),
+      demo_hidapi кондиционирован (пины C0/C1/C2, WS2812 за гвардом).
+      Верификация: WG015 компилируется (стек+демо); V003 объекты БИТ-ИДЕНТИЧНЫ
+      (rv003usb.c и demo_hidapi.c — проверено picolibc-сборкой и cmp)
+- [ ] Полная линковка demo_hidapi.elf под WG015 (Makefile.wg015 end-to-end: printf/retarget
+      решить — puts-заглушка или UART) + TUNE-паддинги: статический леджер слотов
 - [ ] Бутлоадер + хост-CLI; бенч-прошивки wg015_bench
 - [ ] Трек BOOT-B (после P4, отдельный бранч): DFU-лодер на базе
       kimstik/SAMDx1-USB-DFU-Bootloader — см. PLAN Р8/BOOT-B. dfu-util вместо CLI,
