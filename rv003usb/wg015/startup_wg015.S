@@ -62,12 +62,13 @@
 	.globl _start
 	.balign 4
 _start:
-	/* Stack at the top of TCM-B (data bank; code bank is TCM-A — Р6). */
-	la sp, __stack_top
+	/* gp first (inside norelax — nothing may be gp-relaxed before gp is
+	 * valid), then stack at the top of TCM-B (data bank; code = TCM-A, Р6). */
 	.option push
 	.option norelax
 	la gp, __global_pointer$
 	.option pop
+	la sp, __stack_top
 
 	/* Mask everything, then mtvec (direct mode — F11: direct-only assumed)
 	 * to the weak trap stub; the rv003usb ISR port replaces it (Р7). */

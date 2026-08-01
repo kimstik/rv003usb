@@ -45,8 +45,9 @@ else
 LDSCRIPT ?= $(WG015_DIR)/wg015_flash.ld
 endif
 
-# -L so ld resolves `INCLUDE wg015_common.ld` inside the variant scripts.
-LDFLAGS += -T $(LDSCRIPT) -Wl,-L$(WG015_DIR) -Wl,--gc-sections \
+# -L so ld resolves `INCLUDE wg015_common.ld` inside the variant scripts;
+# GNU ld only searches -L paths given BEFORE -T — keep this order.
+LDFLAGS += -Wl,-L$(WG015_DIR) -T $(LDSCRIPT) -Wl,--gc-sections \
 	-Wl,-Map=$(TARGET).map -Wl,--print-memory-usage
 
 ##### Sources #####
