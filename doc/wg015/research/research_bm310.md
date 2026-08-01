@@ -1,6 +1,6 @@
 # CloudBEAR BM-310S6 core research (beyond K1921VG015 РП)
 
-Status: IN PROGRESS (2026-07-31). Goal: characterize the core itself — I-cache ownership,
+Status: COMPLETE (2026-08-01; §8 + GAPS finished after toolchain dissection). Goal: characterize the core itself — I-cache ownership,
 pipeline timing, mtvec modes, TCM semantics, ISA extensions — from CloudBEAR + sibling-MCU sources.
 
 ## 1. BM-310 family overview / configuration options
@@ -59,10 +59,34 @@ Source: cnx-software.com/2020/10/20/bm-310-risc-v-mcu-core-iot-applications/ (ba
 ### K1921VG3T (NIIET's other RISC-V): uses Syntacore SCR1, not CloudBEAR (SDK plf.h `PLF_CORE_VARIANT_SCR1`, niiet_riscv_sdk/platform/Device/K1921VG3T/Include/plf.h:11-13) — explains Syntacore boilerplate leaking into VG015 SDK; do not treat SDK `SCR_*`/cache macros as BM-310 evidence.
 
 ## 8. -mfix-cloudbear-0001 (FPU erratum) — pipeline internals
-TBD
+Erratum text (official ERRATA К1921ВГ015 Rev.4 LQFP100, 25.07.2025, niiet.ru/wp-content/uploads/2025/07/errata_K1921VG015_Rev4_lqfp100.pdf, item 5):
+- «При использовании команды деления блока FPU (fdiv.s) и команды вычисления квадратного корня (fsqrt.s) в случае, когда один или два операнда команды размещены во FLASH возвращается некорректный результат.» Workarounds: GCC 14.1 from tools.cloudbear.ru with `-mfix-cloudbear-0001`; asm: «перед командой fdiv.s или fsqrt.s добавить команду nop»; C without fix: don't use FLASH-resident float constants as div/sqrt operands — copy to variables (RAM) first.
+
+Toolchain dissection (downloaded riscv_gnu_toolchain_elf-14.1.0.7.tar.gz from tools.cloudbear.ru/tools/centos8/, GCC 14.1.0, verified by compiling test cases 2026-08-01):
+- Official option help: **"Avoid sequencing iterative instruction after associated load, that may trigger erratum when load operand resides in flash memory."** (`gcc --help=target`).
+- Implemented as 5 peephole2 patterns in `gcc/config/riscv/cloudbear.md` (lines 6, 30, 55 — visible in cc1 debug strings; source file not shipped, path `/home/jenkins/.../riscv-gcc/gcc/config/riscv/cloudbear.md`).
+- Empirical behavior (rv32imfc -O2): inserts one `nop` immediately before **every** `fdiv.s`, `fsqrt.s`, **and integer `div`/`divu`/`rem`/`remu`** — unconditionally, even with register-only operands and even when no load precedes (tested: reg/reg div, back-to-back fdivs each get own nop). Blunt over-approximation of the real hazard.
+- **What this reveals about the pipeline:** the hazard is a preceding *multi-wait-state load* (flash data read) feeding the *iterative* (multi-cycle, non-pipelined) divide/sqrt unit. A 1-cycle bubble between load and iterative-issue fixes it => the iterative unit's operand capture mis-latches when the forwarded load result arrives late (flash wait states), i.e. the core has a scoreboard/late-forward load interlock rather than stalling issue — TCM loads (fixed 1-cycle) never trigger it, flash loads (variable latency) do.
+- CloudBEAR guards the **integer divider too** — NIIET's erratum text (FPU only) is likely incomplete; treat `div/rem` with flash-resident operands as suspect on silicon.
+- Side discovery: toolchain has `-mtune=cloudbear-51-series/52-series/72-series` and `-mcpu=bi651d5/bi652s0/bi672s0` (BI-6xx application cores) — **no BM-310 tune/mcpu exists**, so no published compiler cost model (latencies) for BM-310.
+- Implication for cycle-exact flash execution: data loads from flash have variable latency (prefetch-buffer hit vs miss) and the core overlaps them with subsequent independent instructions — avoid flash data loads entirely inside timed windows (keep timed code + its data ops TCM/register-only, or accept jitter).
 
 ## GAPS (hardware-measure-only)
-TBD
+1. **Which pipeline option (0- vs 1-cycle taken-branch penalty)** the BM-310S6 in K1921VG015 uses — measure with mcycle around a branch loop in TCM.
+2. **I-cache control**: does FLASH->CTRL.CEN actually gate the 2KB Cache-I, or only the 2x128-bit prefetch buffers? Measure: timed flash-execution loop with CEN=0 vs CEN=1; determinism jitter with cache on/off. No architectural cache CSRs exist to probe.
+3. Exact load-to-use latency TCM (expect 1) vs flash-data-load latency (variable; see §8) — measure.
+4. Store cost, jal/jalr cost, IRQ entry latency (interrupt to first handler insn), MRET cost — no public numbers anywhere; measure with mcycle + GPIO toggle.
+5. mtvec MODE=1 writable? — write 0x...01, read back (expect WARL to 0 per Milandr sibling).
+6. TCM same-port I+D contention penalty magnitude — measure code+data in same 128K half vs split.
+7. Zba/Zbb/Zbc/Zbs actually execute (РП says yes; SDK never uses) — probe `andn` for illegal-instruction trap.
+8. Whether integer div/rem with flash operands really corrupts (CloudBEAR guards it, NIIET erratum silent) — test or just avoid.
 
 ## Sources
-TBD
+- cloudbear.ru/bm_310.html (+ /ru/) — BM-310 product page (fetched 2026-07-31).
+- cnx-software.com/2020/10/20/bm-310-risc-v-mcu-core-iot-applications/ — pipeline option menu, penalties (CloudBEAR RISC-V Global Forum 2020 material).
+- niiet.ru/wp-content/uploads/2025/07/errata_K1921VG015_Rev4_lqfp100.pdf — ERRATA Rev.4 25.07.2025 (item 5 = FPU/flash-operand; local text: scratchpad/errata_vg015.txt).
+- tools.cloudbear.ru/tools/centos8/riscv_gnu_toolchain_elf-14.1.0.7.tar.gz — CloudBEAR GCC 14.1.0.7 (dissected 2026-08-01; local: scratchpad/riscv_gnu_toolchain_elf-14.1.0.7/).
+- НИИЭТ РП К1921ВГ015 (19.02.2025) — local manual.txt (line refs throughout).
+- Milandr К1986ВК025 spec ТСКЯ.431296.023СП (475 pp) — support.milandr.ru; local scratchpad/k1986vk025.pdf.
+- habr.com/ru/articles/883220/ (K1921VG015 review), habr.com/ru/company/milandr/blog/518138/ (BM-310S in MDR32F02).
+- niiet_riscv_sdk (SDK headers/startup), rv003usb repo local files.

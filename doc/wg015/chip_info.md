@@ -113,6 +113,7 @@ Deep-dive over РП 19.02.2025 + official errata Rev.4 (25.07.2025) supersedes i
 8. Core: RV32IMC ops = 1 cycle (РП §8), MUL=2, DIV=2..16, **CSR ops drain the pipeline**; rdcycle available. Taken-branch/load real cost still unmeasured.
 9. Not 5V-tolerant (abs max VCC+0.6, ≤5 s). IO 4 mA. Errata №1: RTC_REG[14] corrupt — don't use for boot flag.
 10. REFSEL contradiction: РП fig. 4.1 implies REFSEL=1 for HSE→PLL, SDK never sets it and works — resolve on hardware (research_clocks.md §1.2).
+11. **I-cache is a BM-310S6 core option** (CloudBEAR-configurable; sibling Milandr BM-310S has none), no cache CSRs, fence.i only → uncontrollable; CEN likely gates NIIET's flash prefetch instead. TCM = two independent 128K/32-bit ports, 0-wait, contention only same-port I+D. `-mfix-cloudbear-0001` dissection: NOP needed before fdiv/fsqrt AND div/rem when operand was loaded from flash — flash D-loads have variable latency (late forwarding). (research_bm310.md)
 
 ## UNVERIFIED / TODO
 
