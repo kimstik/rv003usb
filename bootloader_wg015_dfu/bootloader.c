@@ -177,7 +177,9 @@ int main( void )
 	// ---- Main loop --------------------------------------------------------
 	while(1)
 	{
-		if( do_flash_op && dnload_buf[0] == pending_len )
+		// dnload_buf[0] is written from the ISR (control-out capture
+		// completion, rv003usb.c:384) — must be re-read every pass.
+		if( do_flash_op && *(volatile uint32_t *)&dnload_buf[0] == pending_len )
 		{
 			// Quiet-bus window: the GETSTATUS(dfuDNBUSY) IN answer goes out
 			// within the next LS frame; the host then waits bwPollTimeout
@@ -263,6 +265,7 @@ void usb_handle_other_control_message( struct usb_endpoint * e, struct usb_urb *
 				break; // no capture armed: payload is ACKed and dropped
 			}
 			// Arm generic control-out capture (rv003usb.c:369-388).
+			do_flash_op = 0; // clear any stale arm from a torn transfer
 			dnload_buf[0] = 0;
 			dfu_addr = addr;
 			pending_len = wLength;
