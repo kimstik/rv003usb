@@ -1,0 +1,98 @@
+# Makefile.wg015 — standalone build for the rv003usb WG015 (K1921VG015)
+# target.  py32-pattern (PLAN Р9): included FROM a demo directory, does NOT
+# include ch32fun.mk (the ch32fun submodule is empty in this repo anyway).
+#
+# Usage from a demo directory (e.g. demo_hidapi/):
+#   TARGET:=demo_hidapi
+#   include ../rv003usb/wg015/Makefile.wg015
+# or standalone:
+#   make -f ../rv003usb/wg015/Makefile.wg015 TARGET=demo_hidapi
+#
+# NOTE (scaffold): rv003usb.c/.S do not yet compile for WG015 — the P2+ port
+# tasks (usb_port_wg015.h macro contracts, C seams) make them build.
+
+TARGET ?= $(notdir $(CURDIR))
+
+# Directory of this makefile = rv003usb/wg015/
+WG015_DIR := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
+RV003USB_DIR := $(WG015_DIR)/..
+
+##### Toolchain (PLAN Р9: GCC 13.2 riscv-none-elf) #####
+PREFIX  ?= riscv-none-elf-
+CC      := $(PREFIX)gcc
+OBJCOPY := $(PREFIX)objcopy
+OBJDUMP := $(PREFIX)objdump
+SIZE    := $(PREFIX)size
+
+##### Flags #####
+# rv32imc_zicsr, no F (эррата №5 stays out of reach); LTO explicitly OFF for
+# asm layout determinism (cycle-counted code must not be reshuffled).
+ARCHFLAGS := -march=rv32imc_zicsr -mabi=ilp32
+CFLAGS  += -Os -g -Wall $(ARCHFLAGS) \
+	-static -nostdlib -ffreestanding -fno-lto \
+	-ffunction-sections -fdata-sections
+
+# Include order matters: this directory FIRST so the shim ch32fun.h wins
+# for the untouched `#include "ch32fun.h"` at rv003usb.S:1 / rv003usb.c:10.
+INCLUDES := -I$(WG015_DIR) -I. -I$(RV003USB_DIR) -I$(RV003USB_DIR)/../lib
+
+# Linker script variant switch (PLAN Р6): default flash-first; TIMECRIT_TCM=1
+# relocates .timecrit to TCM-A (requires z8 trampolines).
+TIMECRIT_TCM ?= 0
+ifeq ($(TIMECRIT_TCM),1)
+LDSCRIPT ?= $(WG015_DIR)/wg015_timecrit_tcm.ld
+else
+LDSCRIPT ?= $(WG015_DIR)/wg015_flash.ld
+endif
+
+# -L so ld resolves `INCLUDE wg015_common.ld` inside the variant scripts.
+LDFLAGS += -T $(LDSCRIPT) -Wl,-L$(WG015_DIR) -Wl,--gc-sections \
+	-Wl,-Map=$(TARGET).map -Wl,--print-memory-usage
+
+##### Sources #####
+SOURCES := $(TARGET).c \
+	$(RV003USB_DIR)/rv003usb.c \
+	$(RV003USB_DIR)/rv003usb.S \
+	$(WG015_DIR)/startup_wg015.S \
+	$(ADDITIONAL_C_FILES)
+
+WG015_HEADERS := $(WG015_DIR)/ch32fun.h $(WG015_DIR)/K1921VG015_min.h
+
+##### Flashing (OpenOCD + DCVostok adapter assumed, PLAN Р8) #####
+OPENOCD ?= openocd
+# TODO(port): pin the exact DCVostok+K1921VG015 config in P0 (bench task);
+# no cfg ships with this scaffold.
+OPENOCD_CFG ?= $(WG015_DIR)/dcvostok_k1921vg015.cfg
+
+##### Targets #####
+all : $(TARGET).elf $(TARGET).bin $(TARGET).lst size
+
+$(TARGET).elf : $(SOURCES) $(WG015_HEADERS) $(LDSCRIPT) $(WG015_DIR)/wg015_common.ld
+	$(CC) -o $@ $(SOURCES) $(CFLAGS) $(INCLUDES) $(LDFLAGS)
+
+$(TARGET).bin : $(TARGET).elf
+	$(OBJCOPY) -O binary $< $@
+
+$(TARGET).lst : $(TARGET).elf
+	$(OBJDUMP) -S $< > $@
+
+size : $(TARGET).elf
+	$(SIZE) $<
+
+flash : $(TARGET).elf
+	$(OPENOCD) -f $(OPENOCD_CFG) -c "program $(TARGET).elf verify reset exit"
+
+# Fork-copy gate guard (PLAN Р2): V003 and V00x builds must stay bit-identical
+# to upstream while the WG015 port evolves (objcopy + cmp against a pristine
+# checkout; V00x checked by building bootloader_v006).
+# TODO(port): runs in the V003 toolchain context — cannot be implemented here
+# while the ch32fun submodule is empty in this container; wire it up once the
+# V003 build environment exists (needs: riscv gcc for V003, ch32fun.mk,
+# reference binaries from master).
+check-identity :
+	@echo "TODO(port): bit-identity check of V003/V00x builds not yet wired up (empty ch32fun submodule); see PLAN.md P2 gate." && exit 1
+
+clean :
+	rm -f $(TARGET).elf $(TARGET).bin $(TARGET).lst $(TARGET).map
+
+.PHONY : all size flash clean check-identity

@@ -3,8 +3,8 @@
  *
  * Deliberately NOT the vendor K1921VG015.h (12.4k lines, license unverified —
  * PLAN.md Р9).  Contains ONLY what this port needs.  Every block cites its
- * source in РП К1921ВГ015 (19.02.2025) once; per-field facts come from
- * doc/wg015/research/*.md which carry the manual.txt line references.
+ * source in РП К1921ВГ015 (19.02.2025) once; per-field facts come from the
+ * doc/wg015/research/ files which carry the manual.txt line references.
  *
  * Conventions follow ch32fun: plain C structs of volatile uint32_t, base
  * address macros, _Pos/_Msk field defines.  All macros shared with assembly
