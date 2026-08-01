@@ -19,7 +19,12 @@
       возможно частично записан; перезапустить исследование (вопросы в файле/истории:
       I-cache в ядре или во флеш-контроллере(CEN)? тайминги конвейера; mtvec vectored;
       sibling: Milandr MDR32F02 на BM-310S4; патч -mfix-cloudbear-0001).
-- [ ] PLAN.md v2 = интеграция redteam_findings + research_bm310 (пишет оркестратор)
+- [x] PLAN.md v2 = интегрированы 18 находок timing+flash линз (blockers: z3-по-сайтово,
+      G1-переписан с вытеснителем и кумулятивной экскурсией, H2 снята; majors: DPU-clobber,
+      TX-slew R12, вход ≤55 тактов, PLIC threshold, MICC-бенч, LAT-integrity R11, z8-трамплины)
+- [ ] research_bm310 перезапустить → при новых фактах точечно обновить PLAN §0/P1.4
+- [ ] Red-team round 2: boot/arch/complete линзы (+ повторная верификация v2 при желании) →
+      интеграция → PLAN v3 final
 
 ## Правила
 - Каждый факт — с источником (URL / file:line / commit). Неподтверждённое — в раздел UNVERIFIED.
