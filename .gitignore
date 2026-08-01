@@ -1,2 +1,8 @@
 .vscode
 .pio
+*.elf
+*.map
+*.lst
+bench.bin
+demo_*.bin
+bootloader.bin
