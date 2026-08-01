@@ -3,11 +3,16 @@
 #include <string.h>
 #include "rv003usb.h"
 
+#if !defined(WG015) || !WG015
 #define WSRAW
 #define WS2812B_ALLOW_INTERRUPT_NESTING
 #define WS2812DMA_IMPLEMENTATION
 #define DMALEDS 96 // Provide enough of a buffer things don't get messed up (actually uses 768 bytes)
 #include "ws2812b_dma_spi_led_driver.h"
+#else
+// WG015: the WCH DMA/SPI WS2812 driver does not apply; LED payload is a no-op.
+#define WS2812BDMAStart( x ) do { (void)(x); } while(0)
+#endif
 
 // Allow reading and writing to the scratchpad via HID control messages.
 uint8_t scratch[255];
@@ -17,10 +22,12 @@ uint32_t runwordpadready = 0;
 volatile int32_t runwordpad;
 static uint8_t frame;
 
+#if !defined(WG015) || !WG015
 uint32_t WS2812BLEDCallback( int wordno )
 {
 	return ((uint32_t*)scratch)[wordno+1];
 }
+#endif
 
 
 int main()

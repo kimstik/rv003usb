@@ -133,6 +133,16 @@ static inline void WG015_DisableGlobalIRQ( void )
 	asm volatile( "csrc mstatus, %0" :: "r"(WG015_MSTATUS_MIE) );
 }
 
+/* ch32fun API compatibility for demo code: clock is fully brought up by
+ * startup_wg015.S, so SystemInit is a no-op; Delay_Ms counts rdcycle. */
+static inline void SystemInit( void ) { }
+static inline void Delay_Ms( uint32_t ms )
+{
+	uint32_t start = (uint32_t)({ uint32_t r; asm volatile("rdcycle %0":"=r"(r)); r; });
+	uint32_t cycles = ms * 48000u; /* FUNCONF_SYSTEM_CORE_CLOCK/1000 */
+	while( (uint32_t)({ uint32_t r; asm volatile("rdcycle %0":"=r"(r)); r; }) - start < cycles );
+}
+
 /* --- GPIO bring-up pieces for the usb_setup() C seam (PLAN Р3 seam #2) --- */
 /* Ports are unclocked AND held in reset after power-up: enable both gates
  * (research_gpio.md §1).  Replaces RCC->APB2PCENR at rv003usb.c:60. */
@@ -156,10 +166,13 @@ static inline void WG015_DisableGlobalIRQ( void )
 	(port)->INTENSET   = (pinmask); \
 } while(0)
 
-/* TODO(port): C seam #4 REBOOT_TO_BOOTLOADER() (V003 counterpart
- * rv003usb.c:179-184) — WG015: PMURTC_RTC_REG[0] = flag; RCU->RSTSYS =
- * RCU_RSTSYS_MAGIC.  Deferred to P5 with the flag/RSTSTAT qualification
- * protocol (PLAN Р8). */
+/* Seam #4 (REBOOT_TO_BOOTLOADER, PLAN Р3/Р8): boot-flag contract with the
+ * bootloader. One-shot: the loader reads RTC_REG[0], clears it immediately,
+ * and honors it only when RCU->RSTSTAT reports SYSRST (not POR). Values are
+ * fixed here and used by both sides (app path lives in rv003usb.c). */
+#define WG015_RTC_REG(n)      (*(volatile uint32_t *)PMURTC_RTC_REG_ADDR(n))
+#define WG015_BOOT_FLAG_STAY  0xB00710ADu /* stay in bootloader after reset  */
+#define WG015_BOOT_FLAG_APP   0x0AFF10ADu /* fast-path: jump to app at once  */
 
 #endif /* !__ASSEMBLER__ */
 
