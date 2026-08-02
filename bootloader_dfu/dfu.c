@@ -1,4 +1,4 @@
-// dfu_core.c — portable USB DFU 1.1 bootloader core.
+// dfu.c — portable USB DFU 1.1 bootloader core.
 //
 // THREE-LAYER SPLIT (each layer replaceable independently):
 //   * this file        — DFU protocol: state machine, request semantics,

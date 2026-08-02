@@ -1,5 +1,5 @@
 // dfu_port.h — K1921VG015 (WG015) port of the DFU bootloader core.
-// This is the WHOLE chip-specific surface of ../rv003usb/dfu_core.c; a new
+// This is the WHOLE chip-specific surface of ../rv003usb/dfu.c; a new
 // target (e.g. a V003 backport, TODO 19b) supplies its own dfu_port.h +
 // usb_config.h + Makefile/ld and reuses the core untouched.
 #ifndef _DFU_PORT_WG015_H

@@ -1,5 +1,5 @@
 // dfu_rv003usb.h — TRANSPORT port of the DFU core onto the rv003usb bitbang
-// stack.  Included at the BOTTOM of dfu_core.c (single TU); uses the core's
+// stack.  Included at the BOTTOM of dfu.c (single TU); uses the core's
 // dfu_class_request() and implements the statics it prototyped.
 //
 // A hardware-USB transport (e.g. the WG015 HW block on a fixed silicon
