@@ -9,7 +9,7 @@
 TARGET := bootloader
 LDSCRIPT := wg015-dfu-bootloader.ld
 
-include ../rv003usb/wg015/Makefile.wg015
+include ../../rv003usb/wg015/Makefile.wg015
 
 # Size discipline (as bootloader_wg015): current 2748 B; hard ld cap 4096.
 SIZE_BUDGET := 3000
