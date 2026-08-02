@@ -52,9 +52,43 @@ struct rv003usb_internal rv003usb_internal_data;
 #define LOCAL_CONCAT(A, B) A##B
 #define LOCAL_EXP(A, B) LOCAL_CONCAT(A,B)
 
+#define LOCAL_CONCAT3(A, B, C) A##B##C
+#define LOCAL_EXP3(A, B, C) LOCAL_CONCAT3(A,B,C)
+
 void usb_setup()
 {
 	rv003usb_internal_data.se0_windup = 0;
+
+#if defined(WG015) && WG015
+	// K1921VG015 seam #2 (PLAN Р3): clock, pins, trap vector, PLIC.
+	// After reset all pins are already tri-state GPIO inputs (РП §11.1).
+	WG015_GPIO_CLOCK_ENABLE( LOCAL_EXP3( RCU_CGCFGAHB_GPIO, USB_PORT, EN ) );
+
+	GPIO_TypeDef * usbport = LOCAL_EXP( GPIO, USB_PORT );
+
+	// D+/D-: floating inputs - no output driver, no pull-up.
+	usbport->OUTENCLR = USB_DMASK;
+	usbport->PULLMODE &= ~(uint32_t)USB_DMASK;
+
+	// D- falling edge interrupt (INTTYPE=edge, INTPOL=falling, single edge).
+	WG015_GPIO_IRQ_FALLING( usbport, 1<<USB_PIN_DM );
+
+#ifdef USB_PIN_DPU
+	// Drive DPU high: 1.5k to D- tells the host we are going on-bus.
+	WG015_GPIO_SET( usbport, 1<<USB_PIN_DPU );
+	WG015_GPIO_OUTPUT( usbport, 1<<USB_PIN_DPU );
+#endif
+
+	// mtvec (direct mode) -> asm handler; the handler is .balign 4 so the
+	// low mode bits are naturally zero. Then unmask PLIC line 5 at max prio.
+	{
+		extern void EXTI7_0_IRQHandler( void );
+		asm volatile( "csrw mtvec, %0" : : "r"( EXTI7_0_IRQHandler ) );
+	}
+	WG015_EnableIRQ( WG015_IRQ_GPIO, 7 );
+	WG015_EnableMachineExternalIRQ();
+}
+#else
 
 	// Enable GPIOs, TIMERs
 	RCC->APB2PCENR |= LOCAL_EXP( RCC_APB2Periph_GPIO, USB_PORT ) | RCC_APB2Periph_AFIO;
@@ -152,6 +186,7 @@ void usb_setup()
 	// enable interrupt
 	NVIC_EnableIRQ( EXTI7_0_IRQn );
 }
+#endif // WG015
 
 #if RV003USB_BOOTLOADER
 extern volatile int32_t runwordpad;
@@ -175,13 +210,20 @@ void usb_pid_handle_in( uint32_t addr, uint8_t * data, uint32_t endp, uint32_t u
 	{
 		usb_send_empty( sendtok );
 
-		// Initiate boot into bootloader
+		// Initiate boot into bootloader (seam #4, PLAN Р3/Р8)
+#if defined(WG015) && WG015
+		// One-shot flag in a soft-reset-surviving register + system reset.
+		// Bootloader honors it only when RSTSTAT says SYSRST, then clears it.
+		WG015_RTC_REG(0) = WG015_BOOT_FLAG_STAY;
+		RCU->RSTSYS = RCU_RSTSYS_MAGIC;
+#else
 		FLASH->BOOT_MODEKEYR = FLASH_KEY1;
 		FLASH->BOOT_MODEKEYR = FLASH_KEY2;
 		FLASH->STATR = 1<<14; // 1<<14 is zero, so, boot bootloader code. Unset for user code.
 		FLASH->CTLR = CR_LOCK_Set;
 		RCC->RSTSCKR |= 0x1000000;
 		PFIC->SCTLR = 1<<31;
+#endif
 	}
 #endif
 

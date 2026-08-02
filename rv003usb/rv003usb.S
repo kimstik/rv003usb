@@ -1,16 +1,41 @@
 #include "ch32fun.h"
 #include "rv003usb.h"
 
+#if defined(WG015) && WG015
+// K1921VG015 GPIO (РП А.6). DATA @+0 replaces INDR for reads.
+// Writes: MASKLB window (base+0x400+(mask<<2)) is a hardware-masked DATAOUT
+// write touching ONLY the D+/D- bits - exact BSHR-absolute semantics, DPU on
+// the same port is never clobbered. So BSHR_OFFSET is simply remapped and the
+// whole TX engine (s1 = absolute pair state, t1 = flip word) is unchanged.
+#define INDR_OFFSET 0
+#define BSHR_OFFSET (0x400 + (USB_DMASK<<2))
+#define GPIO_OUTENSET_OFFSET  0x2C
+#define GPIO_OUTENCLR_OFFSET  0x30
+#define GPIO_INTSTATUS_OFFSET 0x80
+#define PLIC_MICC 0x0C200004
+#else
 #define CFGLR_OFFSET 0
 #define INDR_OFFSET 8
 #define BSHR_OFFSET 16
+#endif
 
 
 #define LOCAL_CONCAT(A, B) A##B
 #define LOCAL_EXP(A, B) LOCAL_CONCAT(A,B)
 
+#if !defined(WG015) || !WG015
 #define SYSTICK 0xE000F000
 #define SYSTICK_CNT_OFFSET 8
+#endif
+
+// Far dispatch: time-critical section and the C protocol layer live too far
+// apart for compressed branches (CH32V00x: RAM<->flash; WG015: only when
+// .timecrit is placed in TCM-A while C stays in flash - the R1 fallback).
+#if (defined(CH32V00x) && CH32V00x) || (defined(WG015_TIMECRIT_TCM) && WG015_TIMECRIT_TCM)
+#define USB_FAR_DISPATCH 1
+#else
+#define USB_FAR_DISPATCH 0
+#endif
 
 // Flash in CH32V00x is 1.5-2x slower than in CH32V003, this means we have to run USB time sensitive code from RAM.
 // But RAM code executes faster than FLASH code in CH32V003, this means we need to add extra delays.
@@ -26,7 +51,15 @@
 #endif
 
 //See RV003USB_DEBUG_TIMING note in .c file.
-#if defined( RV003USB_DEBUG_TIMING ) && RV003USB_DEBUG_TIMING
+#if defined(WG015) && WG015
+// P10 markers: MASKLB[0] (mask=0) is an architectural no-op write - the store
+// always executes with identical timing; the TUNE build repoints x4 (and a
+// runtime mask) at a real MASKLB window / DATAOUTTGL to emit LA-visible edges.
+#define DEBUG_TICK_SETUP la x4, (USB_GPIO_BASE + 0x400) // masked-write no-op sink
+#define DEBUG_TICK_MARK .balign 4; sw x0, 0(x4)
+#define	RESTORE_DEBUG_MARKER(x) lw	x4, x(sp)
+#define SAVE_DEBUG_MARKER(x)	sw	x4, x(sp)
+#elif defined( RV003USB_DEBUG_TIMING ) && RV003USB_DEBUG_TIMING
 #define DEBUG_TICK_SETUP la x4, (TIM1_BASE + 0x24) 	// for debug
 #define DEBUG_TICK_MARK .balign 4; sw x0, 0(x4)
 #define	RESTORE_DEBUG_MARKER(x) lw	x4, x(sp)
@@ -52,7 +85,11 @@ Compressed:
 	s0, s1,	a0, a1, a2, a3, a4, a5
 */
 
-#if !defined(CH32V00x) || !CH32V00x
+#if defined(WG015) && WG015
+// Placement-agnostic time-critical section: linker puts it in FLASH (default)
+// or TCM-A (G1 fallback; then also define WG015_TIMECRIT_TCM for far dispatch).
+.section .timecrit, "ax"
+#elif !defined(CH32V00x) || !CH32V00x
 #warning "CH32V003"
 .section .text.vector_handler
 #else
@@ -76,10 +113,16 @@ EXTI7_0_IRQHandler:
 	sw	s1, 28(sp)
 
 #if defined (RV003_ADD_EXTI_MASK) && defined (RV003_ADD_EXTI_HANDLER)
+#if defined(WG015) && WG015
+	lw a2, GPIO_INTSTATUS_OFFSET(a5) // pending pin flags of the shared PLIC line
+	c.andi a2, USB_DMASK
+	c.beqz a2, another_interrupt_check
+#else
 	la a1, 0x40010414 //	R32_EXTI_INTFR
 	c.lw a2, 0(a1)
 	c.andi a2, USB_DMASK
 	c.beqz a2, another_interrupt_check
+#endif
 #endif
 
 	SAVE_DEBUG_MARKER( 48 );
@@ -88,7 +131,7 @@ EXTI7_0_IRQHandler:
 	c.andi a1, USB_DMASK;
 
 	// Finish jump to se0
-#if defined(CH32V00x) && CH32V00x
+#if USB_FAR_DISPATCH
 	VOOXDELAY
 	c.bnez a0, 1f
 	auipc a0, %hi(handle_se0_keepalive)
@@ -457,7 +500,7 @@ se0_complete:
 	la a4, rv003usb_internal_data
 
 	// ACK doesn't need good CRC.
-#if !defined(CH32V00x) || !CH32V00x
+#if !USB_FAR_DISPATCH
 	c.beqz a5, usb_pid_handle_ack
 
 	// Next, check for tokens.
@@ -485,7 +528,7 @@ may_be_a_token:
 	XW_C_LBU(s0, a4, MY_ADDRESS_OFFSET_BYTES);	//	lbu s0, MY_ADDRESS_OFFSET_BYTES(a4)
 	bne s0, a0, done_usb_message // addr != 0 && addr != ours.
 yes_check_tokens:
-#if !defined(CH32V00x) || !CH32V00x
+#if !USB_FAR_DISPATCH
 	addi a5, a5, (0b01001011-0b10000111)
 	c.beqz a5, usb_pid_handle_out
 	c.addi a5, (0b10000111-0b10010110)
@@ -524,7 +567,7 @@ crc_for_tokens_would_be_bad_maybe_data:
 	c.addi a3, 1
 	addi a5, a5, (0b01001011-0b11000011)
 	c.li a2, 0
-#if !defined(CH32V00x) || !CH32V00x
+#if !USB_FAR_DISPATCH
 	c.beqz a5, usb_pid_handle_data
 	c.addi a5, (0b11000011-0b11010010)
 	c.li a2, 1
@@ -553,8 +596,13 @@ done_usb_message_in:
 
 #if defined (RV003_ADD_EXTI_MASK) && defined (RV003_ADD_EXTI_HANDLER)
 another_interrupt_check:
+#if defined(WG015) && WG015
+	la a5, USB_GPIO_BASE
+	lw a0, GPIO_INTSTATUS_OFFSET(a5)
+#else
 	la a5, EXTI_BASE + 20
 	lw a0, 0(a5)
+#endif
 	andi a0, a0, RV003_ADD_EXTI_MASK
 	c.beqz a0, ret_from_se0
 
@@ -572,9 +620,24 @@ ret_from_se0:
 
 interrupt_complete:
 	// Acknowledge interrupt.
-	// EXTI->INTFR = 1<<4
 	c.j 1f; 1: // Extra little bit of delay to make sure we don't accidentally false fire.
 
+#if defined(WG015) && WG015
+	// Order matters (РП §9.2/§11.4): clear the W1C pin flag FIRST, then
+	// claim+complete PLIC line 5 - else the still-asserted GPIO request
+	// re-triggers the edge-sensitive gateway right after completion.
+	la a5, USB_GPIO_BASE
+#ifdef RV003_ADD_EXTI_MASK
+	li a0, (RV003_ADD_EXTI_MASK|(1<<USB_PIN_DM))
+#else
+	li a0, (1<<USB_PIN_DM)
+#endif
+	sw a0, GPIO_INTSTATUS_OFFSET(a5)
+	la a5, PLIC_MICC
+	lw a0, 0(a5)  // claim: returns source id, clears pending
+	sw a0, 0(a5)  // complete: gateway re-arms for the next edge
+#else
+	// EXTI->INTFR = 1<<4
 	la a5, EXTI_BASE + 20
 #ifdef RV003_ADD_EXTI_MASK
 	li a0, (RV003_ADD_EXTI_MASK|(1<<USB_PIN_DM))
@@ -582,6 +645,7 @@ interrupt_complete:
 	li a0, (1<<USB_PIN_DM)
 #endif
 	sw a0, 0(a5)
+#endif
 	
 	// Restore stack.
 	lw a0, 0(sp)
@@ -591,7 +655,7 @@ interrupt_complete:
 
 ///////////////////////////////////////////////////////////////////////////////
 // High level functions.
-#if defined(CH32V00x) && CH32V00x
+#if USB_FAR_DISPATCH
 .section .text
 #endif
 #if defined(RV003USB_OPTIMIZE_FLASH) && RV003USB_OPTIMIZE_FLASH // Saves 20 bytes
@@ -619,7 +683,7 @@ usb_pid_handle_ack:
 	c.addi a0, 1
 	c.sw a0, (ENDP_OFFSET+EP_COUNT_OFFSET)(a2)
 
-#if defined(CH32V00x) && CH32V00x
+#if USB_FAR_DISPATCH
 	ret
 #else
 	c.j done_usb_message_in
@@ -649,10 +713,10 @@ usb_pid_handle_setup:
 	c.sw a1, (ENDP_OFFSET+EP_OPAQUE_OFFSET)(a2)  //e->opaque = 0;
 	c.sw a1, (ENDP_OFFSET+EP_TOGGLE_OUT_OFFSET)(a2) //e->toggle_out = 0;
 
-#if defined(CH32V00x) && CH32V00x
+#if USB_FAR_DISPATCH
 	ret
 #else
-	c.j done_usb_message_in	
+	c.j done_usb_message_in
 #endif
 
 #endif
@@ -663,7 +727,7 @@ usb_pid_handle_out:
 	//void usb_pid_handle_out( uint32_t addr, uint8_t * data, uint32_t endp, uint32_t unused, struct rv003usb_internal * ist )	
 	//sb a2, 0(a4) //ist->current_endpoint = endp;
 	XW_C_SB( a2, a4, 0 ); // current_endpoint = endp
-#if defined(CH32V00x) && CH32V00x
+#if USB_FAR_DISPATCH
 	ret
 #else
 	c.j done_usb_message_in
@@ -674,10 +738,16 @@ handle_se0_keepalive:
 	// In here, we want to do smart stuff with the
 	// 1ms tick.
 
+#if defined(WG015) && WG015
+	la a4, rv003usb_internal_data
+	c.lw a1, LAST_SE0_OFFSET(a4) //last cycle count   last_se0_cyccount
+	csrr a2, cycle // rdcycle: HCLK-synchronous free-running counter (РП табл. 8.1)
+#else
 	la a0, SYSTICK
 	la a4, rv003usb_internal_data
 	c.lw a1, LAST_SE0_OFFSET(a4) //last cycle count   last_se0_cyccount
 	c.lw a2, SYSTICK_CNT_OFFSET(a0) //this cycle count, in SYSTICK_CNT
+#endif
 	c.sw a2, LAST_SE0_OFFSET(a4) //store it back to last_se0_cyccount
 	c.sub a2, a1
 	c.sw a2, DELTA_SE0_OFFSET(a4) //record delta_se0_cyccount
@@ -688,7 +758,7 @@ handle_se0_keepalive:
 
 	// Make sure we aren't in left field.
 	li a5, 4000
-#if !defined(CH32V00x) || !CH32V00x
+#if !USB_FAR_DISPATCH
 	bge a2, a5, ret_from_se0
 	li a5, -4000
 	blt a2, a5, ret_from_se0
@@ -702,10 +772,14 @@ handle_se0_keepalive:
 	c.add a1, a2
 	c.sw a1, SE0_WINDUP_OFFSET(a4) // save windup
 
+// Trim actuator (per-target plugin, PLAN Р2 USB_TRIM_ACTUATE).
+// WG015: crystal build, no actuator; frame measurement + windup kept above
+// (telemetry + CLK-B reserve). V003: servo-trims the HSI via RCC.CTLR.
+#if !defined(WG015) || !WG015
 	// 0x40021000 = RCC.CTLR
 	la a4, 0x40021000
 	lw a0, 0(a4)
-	li a5, 0xffffff07  
+	li a5, 0xffffff07
 	and a0, a0, a5	// Mask off non-HSI
 
 	// Decimate windup - use as HSIrim.
@@ -717,8 +791,9 @@ handle_se0_keepalive:
 	slli a2, a2, 3
 	or a0, a0, a2
 	sw a0, 0(a4)
+#endif
 
-#if !defined(CH32V00x) || !CH32V00x
+#if !USB_FAR_DISPATCH
 	j ret_from_se0
 #else
 	1:
@@ -750,6 +825,20 @@ usb_send_data:
 
 	la a5, USB_GPIO_BASE
 
+#if defined(WG015) && WG015
+	// ASAP: Turn the bus around. Preset K (DP=1, DM=0) through the masked
+	// window - absolute write, D± bits only, drivers still off - then enable
+	// the output drivers. PRESET strictly before OUTENSET.
+	li s1, (1<<USB_PIN_DP)
+	sw s1, BSHR_OFFSET(a5)          // MASKLB window (see file top): DATAOUT preset
+	li a4, USB_DMASK
+	sw a4, GPIO_OUTENSET_OFFSET(a5) // acquire the bus
+	// TUNE(WG015): acquire is shorter than the V003 CFGLR sequence - re-pad
+	// the pre-preamble ledger when calibrating.
+	// s1 keeps the absolute D± state (K); t1 is the NRZI flip word:
+	// xor s1,t1 toggles both pair bits, masked store re-drives the pair.
+	li t1, USB_DMASK
+#else
 	// ASAP: Turn the bus around and send our preamble + token.
 	c.lw a4, CFGLR_OFFSET(a5)
 
@@ -771,6 +860,7 @@ usb_send_data:
 	c.sw a4, CFGLR_OFFSET(a5)
 
 	li t1, (1<<USB_PIN_DP) | (1<<(USB_PIN_DM+16)) | (1<<USB_PIN_DM) | (1<<(USB_PIN_DP+16));
+#endif
 
 	SAVE_DEBUG_MARKER( 8 )
 
@@ -989,6 +1079,21 @@ no_really_done_sending_data:
 	nx6p3delay( 2, a3 );
 
 	// Need to perform an SE0.
+#if defined(WG015) && WG015
+	c.li s1, 0                      // SE0: both lines low (absolute, masked)
+	sw s1, BSHR_OFFSET(a5)
+
+	nx6p3delay( 7, a3 );
+
+	c.li s1, (1<<USB_PIN_DM)        // J-park: DM=1, DP already 0
+	sw s1, BSHR_OFFSET(a5)
+
+	// Release the bus: back to inputs with one atomic clear.
+	li a3, USB_DMASK
+	sw a3, GPIO_OUTENCLR_OFFSET(a5)
+	// TUNE(WG015): release is shorter than the V003 CFGLR rewrite - re-pad
+	// if the J-park hold time before release matters on the analyzer.
+#else
 	li s1, (1<<(USB_PIN_DM+16)) | (1<<(USB_PIN_DP+16))
 	c.sw s1, BSHR_OFFSET(a5)
 
@@ -1005,6 +1110,7 @@ no_really_done_sending_data:
 	li a3, ((0b01<<(USB_PIN_DP*4+2)) | (0b01<<(USB_PIN_DM*4+2)))
 	or s1, a3, s1
 	sw s1, CFGLR_OFFSET(a5)
+#endif
 
 	lw s0, 0(sp)
 	lw s1, 4(sp)
