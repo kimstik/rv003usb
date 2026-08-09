@@ -1,0 +1,83 @@
+{
+ "osc-bank": {
+  "amp_shape_mean_db": 0.0,
+  "amp_shape_max_db": 0.0,
+  "spur_db_median": -94.7,
+  "spur_db_worst": -94.3,
+  "nmr_db_median": -94.0,
+  "nmr_db_worst": -88.6,
+  "diverged_cases": 0
+ },
+ "impulse-iir": {
+  "amp_shape_mean_db": 1.17,
+  "amp_shape_max_db": 6.62,
+  "spur_db_median": -94.6,
+  "spur_db_worst": -32.5,
+  "nmr_db_median": -14.1,
+  "nmr_db_worst": -8.4,
+  "diverged_cases": 0
+ },
+ "impulse-iir-csd": {
+  "amp_shape_mean_db": 6.54,
+  "amp_shape_max_db": 29.35,
+  "spur_db_median": -94.2,
+  "spur_db_worst": -0.4,
+  "nmr_db_median": -1.8,
+  "nmr_db_worst": 9.1,
+  "diverged_cases": 3
+ },
+ "impulse-iir-csd-sos": {
+  "amp_shape_mean_db": 1.36,
+  "amp_shape_max_db": 7.48,
+  "spur_db_median": -94.7,
+  "spur_db_worst": -32.0,
+  "nmr_db_median": -14.1,
+  "nmr_db_worst": 1.7,
+  "diverged_cases": 0
+ },
+ "meander-sq": {
+  "amp_shape_mean_db": 6.18,
+  "amp_shape_max_db": 42.31,
+  "spur_db_median": -57.0,
+  "spur_db_worst": -16.4,
+  "nmr_db_median": 12.6,
+  "nmr_db_worst": 19.2,
+  "diverged_cases": 0
+ },
+ "meander-tri": {
+  "amp_shape_mean_db": 6.66,
+  "amp_shape_max_db": 40.93,
+  "spur_db_median": -94.5,
+  "spur_db_worst": -29.9,
+  "nmr_db_median": 10.4,
+  "nmr_db_worst": 17.4,
+  "diverged_cases": 0
+ },
+ "cycle-replay": {
+  "amp_shape_mean_db": 0.66,
+  "amp_shape_max_db": 6.75,
+  "spur_db_median": -94.5,
+  "spur_db_worst": -31.9,
+  "nmr_db_median": -227.1,
+  "nmr_db_worst": -10.5,
+  "diverged_cases": 0
+ },
+ "cycle-replay-2x": {
+  "amp_shape_mean_db": 0.17,
+  "amp_shape_max_db": 1.77,
+  "spur_db_median": -94.5,
+  "spur_db_worst": -45.3,
+  "nmr_db_median": -231.0,
+  "nmr_db_worst": -20.8,
+  "diverged_cases": 0
+ },
+ "cycle-replay-nn": {
+  "amp_shape_mean_db": 0.57,
+  "amp_shape_max_db": 10.91,
+  "spur_db_median": -94.5,
+  "spur_db_worst": -19.5,
+  "nmr_db_median": -111.6,
+  "nmr_db_worst": 1.7,
+  "diverged_cases": 0
+ }
+}

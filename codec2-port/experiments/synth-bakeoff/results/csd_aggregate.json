@@ -1,0 +1,32 @@
+{
+ "direct-2t": {
+  "sd_rms_db_median": 8.21,
+  "sd_rms_db_worst": 14.85,
+  "pct_unstable": 76.2
+ },
+ "direct-3t": {
+  "sd_rms_db_median": 5.32,
+  "sd_rms_db_worst": 10.89,
+  "pct_unstable": 66.7
+ },
+ "direct-4t": {
+  "sd_rms_db_median": 1.42,
+  "sd_rms_db_worst": 6.42,
+  "pct_unstable": 28.6
+ },
+ "sos-2t": {
+  "sd_rms_db_median": 2.17,
+  "sd_rms_db_worst": 4.05,
+  "pct_unstable": 0.0
+ },
+ "sos-3t": {
+  "sd_rms_db_median": 0.42,
+  "sd_rms_db_worst": 0.97,
+  "pct_unstable": 0.0
+ },
+ "sos-4t": {
+  "sd_rms_db_median": 0.08,
+  "sd_rms_db_worst": 0.24,
+  "pct_unstable": 0.0
+ }
+}
