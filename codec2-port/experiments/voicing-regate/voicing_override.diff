@@ -1,0 +1,100 @@
+diff --git a/src/codec2.c b/src/codec2.c
+index b27626a..164d359 100644
+--- a/src/codec2.c
++++ b/src/codec2.c
+@@ -84,6 +84,69 @@ void codec2_decode_700c(struct CODEC2 *c2, short speech[],
+                         const unsigned char *bits);
+ static void ear_protection(float in_out[], int n);
+ 
++/*---------------------------------------------------------------------------*\
++
++  EXPERIMENT PATCH (codec2-port/experiments/voicing-regate)
++
++  Encoder voicing override for the 1300 mode.  If the environment variable
++  C2_VOICING_OVERRIDE names a readable file, codec2_encode_1300() replaces
++  each 10 ms frame's est_voicing_mbe voicing decision with the k-th
++  '0'/'1' character of that file (all other characters are ignored), where
++  k counts 10 ms analysis frames from the start of the stream.  Frames past
++  the end of the table keep the stock decision (counted + reported on
++  stderr at exit).  With the variable unset the encoder is bit-exact stock.
++  Single-instance only (c2enc), not thread-safe.
++
++\*---------------------------------------------------------------------------*/
++
++static char *vo_tbl = NULL;
++static long vo_n = 0, vo_next = 0, vo_applied = 0, vo_past_end = 0;
++static int vo_init_done = 0;
++
++static void vo_report(void) {
++  fprintf(stderr,
++          "voicing_override: %ld/%ld table entries applied, "
++          "%ld frames past end of table (kept stock)\n",
++          vo_applied, vo_n, vo_past_end);
++}
++
++static int voicing_override_next(int orig) {
++  if (!vo_init_done) {
++    vo_init_done = 1;
++    const char *path = getenv("C2_VOICING_OVERRIDE");
++    if (path != NULL) {
++      FILE *f = fopen(path, "r");
++      if (f == NULL) {
++        fprintf(stderr, "voicing_override: cannot open %s\n", path);
++        exit(1);
++      }
++      fseek(f, 0, SEEK_END);
++      long sz = ftell(f);
++      fseek(f, 0, SEEK_SET);
++      char *buf = (char *)malloc(sz + 1);
++      assert(buf != NULL);
++      long got = fread(buf, 1, sz, f);
++      fclose(f);
++      vo_tbl = (char *)malloc(got + 1);
++      assert(vo_tbl != NULL);
++      for (long i = 0; i < got; i++)
++        if (buf[i] == '0' || buf[i] == '1') vo_tbl[vo_n++] = buf[i];
++      free(buf);
++      fprintf(stderr, "voicing_override: active, %ld entries from %s\n",
++              vo_n, path);
++      atexit(vo_report);
++    }
++  }
++  if (vo_tbl == NULL) return orig;
++  long k = vo_next++;
++  if (k >= vo_n) {
++    vo_past_end++;
++    return orig;
++  }
++  vo_applied++;
++  return vo_tbl[k] - '0';
++}
++
+ /*---------------------------------------------------------------------------*\
+ 
+                                 FUNCTIONS
+@@ -1092,21 +1155,25 @@ void codec2_encode_1300(struct CODEC2 *c2, unsigned char *bits,
+   /* frame 1: - voicing ---------------------------------------------*/
+ 
+   analyse_one_frame(c2, &model, speech);
++  model.voiced = voicing_override_next(model.voiced); /* EXPERIMENT PATCH */
+   pack_natural_or_gray(bits, &nbit, model.voiced, 1, c2->gray);
+ 
+   /* frame 2: - voicing ---------------------------------------------*/
+ 
+   analyse_one_frame(c2, &model, &speech[c2->n_samp]);
++  model.voiced = voicing_override_next(model.voiced); /* EXPERIMENT PATCH */
+   pack_natural_or_gray(bits, &nbit, model.voiced, 1, c2->gray);
+ 
+   /* frame 3: - voicing ---------------------------------------------*/
+ 
+   analyse_one_frame(c2, &model, &speech[2 * c2->n_samp]);
++  model.voiced = voicing_override_next(model.voiced); /* EXPERIMENT PATCH */
+   pack_natural_or_gray(bits, &nbit, model.voiced, 1, c2->gray);
+ 
+   /* frame 4: - voicing, scalar Wo & E, scalar LSPs ------------------*/
+ 
+   analyse_one_frame(c2, &model, &speech[3 * c2->n_samp]);
++  model.voiced = voicing_override_next(model.voiced); /* EXPERIMENT PATCH */
+   pack_natural_or_gray(bits, &nbit, model.voiced, 1, c2->gray);
+ 
+   Wo_index = encode_Wo(&c2->c2const, model.Wo, WO_BITS);
