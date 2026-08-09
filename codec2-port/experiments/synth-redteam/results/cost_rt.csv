@@ -1,0 +1,22 @@
+engine,L,mul/smp,add/smp,shift/smp,mem/smp,MHz@mul,MHz@nomul,RAM_B,flash_B,note
+meander-mip-nn,20,20,40,40,40,1.46,20.5,136,2876,mul is back: B*table load; solve setup kept
+meander-mip-lin,20,40,80,40,60,2.26,40.34,136,2976,linear interp adds 2nd mul per basis
+meander-mip-nn,40,40,80,80,80,2.92,41.0,256,2876,mul is back: B*table load; solve setup kept
+meander-mip-lin,40,80,160,80,120,4.52,80.68,256,2976,linear interp adds 2nd mul per basis
+meander-mip-nn,80,80,160,160,160,5.85,82.01,496,2876,mul is back: B*table load; solve setup kept
+meander-mip-lin,80,160,320,160,240,9.05,161.37,496,2976,linear interp adds 2nd mul per basis
+meander-blep,20,21.0,82.0,0,20,1.82,21.81,176,900,f0=200: 21 blep-mults/smp; recips need L soft-divs/frame
+meander-blep,40,41.0,162.0,0,40,3.62,42.66,336,900,f0=100: 41 blep-mults/smp; recips need L soft-divs/frame
+meander-blep,80,81.0,322.0,0,80,7.23,84.35,656,900,f0=50: 81 blep-mults/smp; recips need L soft-divs/frame
+cr-rt-lin,20,1,3,1,2,0.77,15.62,532,1300,"Nt=128, measured 91% harmonics update/frame"
+cr-rt-lin-sym,20,1,3,1,2,0.42,8.32,532,1400,"half-table odd/even split: setup /2, +2 ops/smp replay"
+cr-rt-lin,40,1,3,1,2,2.87,59.39,1044,1300,"Nt=256, measured 91% harmonics update/frame"
+cr-rt-lin-sym,40,1,3,1,2,1.47,30.21,1044,1400,"half-table odd/even split: setup /2, +2 ops/smp replay"
+cr-rt-lin,80,1,3,1,2,11.28,234.5,2068,1300,"Nt=512, measured 91% harmonics update/frame"
+cr-rt-lin-sym,80,1,3,1,2,5.68,117.76,2068,1400,"half-table odd/even split: setup /2, +2 ops/smp replay"
+kl-lattice-csd3,any,0,84,61,25,2.07,2.07,75,1000,setup=LSP->A->k: 10 soft-divs/subframe dominate
+svf-csd3,any,0,69,45,5,1.24,1.24,61,950,"f,q from b1,b2 need sqrt per section (LUT) + same pole-pair problem"
+lsp-allpass-csd3,any,0,70,30,35,1.51,1.51,90,1000,cos(LSP) straight from bitstream: NO pole-pair conversion at all
+parallel-sos-csd3,any,0,89,61,25,1.99,1.99,110,1100,residues need per-frame solve (est.); +LFSR noise ~3 ops/smp
+sos-csd-jit-honest,any,0,-,-,-,-,0.97,361,900,92 cyc/smp from static asm + 2100 cyc/subframe conversions
+sos-csd-interp-honest,any,0,-,-,-,-,2.64,91,900,308 cyc/smp from static asm + 1600 cyc/subframe conversions

@@ -1,0 +1,17 @@
+{
+ "eps0.25": {
+  "updates_per_frame_mean": 38.3,
+  "L_mean": 40.3,
+  "update_fraction": 0.95
+ },
+ "eps0.5": {
+  "updates_per_frame_mean": 36.8,
+  "L_mean": 40.3,
+  "update_fraction": 0.912
+ },
+ "eps1.0": {
+  "updates_per_frame_mean": 33.5,
+  "L_mean": 40.3,
+  "update_fraction": 0.832
+ }
+}

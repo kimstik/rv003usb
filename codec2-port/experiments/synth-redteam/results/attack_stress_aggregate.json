@@ -1,0 +1,58 @@
+{
+ "osc-bank": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -94.3,
+  "nmr_median_db": -93.1,
+  "nmr_worst_db": -86.8
+ },
+ "impulse-iir": {
+  "env_mean_db": 2.19,
+  "env_max_db": 12.43,
+  "spur_median_db": -68.3,
+  "spur_worst_db": -11.3,
+  "nmr_median_db": -8.5,
+  "nmr_worst_db": 3.5
+ },
+ "impulse-iir-csd-sos": {
+  "env_mean_db": 2.21,
+  "env_max_db": 16.04,
+  "spur_median_db": -68.5,
+  "spur_worst_db": -9.0,
+  "nmr_median_db": -8.7,
+  "nmr_worst_db": 9.6
+ },
+ "kl-lattice-csd3": {
+  "env_mean_db": 2.24,
+  "env_max_db": 13.16,
+  "spur_median_db": -67.6,
+  "spur_worst_db": -11.4,
+  "nmr_median_db": -8.9,
+  "nmr_worst_db": 5.4
+ },
+ "lsp-allpass-csd3": {
+  "env_mean_db": 2.4,
+  "env_max_db": 14.26,
+  "spur_median_db": -67.9,
+  "spur_worst_db": -12.3,
+  "nmr_median_db": -8.5,
+  "nmr_worst_db": 5.8
+ },
+ "svf-csd3": {
+  "env_mean_db": 2.33,
+  "env_max_db": 12.46,
+  "spur_median_db": -68.3,
+  "spur_worst_db": -10.9,
+  "nmr_median_db": -8.5,
+  "nmr_worst_db": 3.4
+ },
+ "parallel-sos-csd3": {
+  "env_mean_db": 2.66,
+  "env_max_db": 17.87,
+  "spur_median_db": -68.7,
+  "spur_worst_db": -10.6,
+  "nmr_median_db": -7.9,
+  "nmr_worst_db": 11.5
+ }
+}

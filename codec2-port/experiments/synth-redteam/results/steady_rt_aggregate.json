@@ -1,0 +1,202 @@
+{
+ "osc-bank": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -94.3,
+  "nmr_median_db": -94.0,
+  "nmr_worst_db": -88.6
+ },
+ "impulse-iir": {
+  "env_mean_db": 1.17,
+  "env_max_db": 6.62,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -32.5,
+  "nmr_median_db": -14.1,
+  "nmr_worst_db": -8.4
+ },
+ "impulse-iir-csd-sos": {
+  "env_mean_db": 1.36,
+  "env_max_db": 7.48,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -32.0,
+  "nmr_median_db": -14.1,
+  "nmr_worst_db": 1.7
+ },
+ "meander-sq": {
+  "env_mean_db": 6.18,
+  "env_max_db": 42.31,
+  "spur_median_db": -57.0,
+  "spur_worst_db": -16.4,
+  "nmr_median_db": 12.6,
+  "nmr_worst_db": 19.2
+ },
+ "meander-tri": {
+  "env_mean_db": 6.66,
+  "env_max_db": 40.93,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -29.9,
+  "nmr_median_db": 10.4,
+  "nmr_worst_db": 17.4
+ },
+ "cycle-replay": {
+  "env_mean_db": 0.66,
+  "env_max_db": 6.75,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -31.9,
+  "nmr_median_db": -227.1,
+  "nmr_worst_db": -10.5
+ },
+ "cycle-replay-2x": {
+  "env_mean_db": 0.17,
+  "env_max_db": 1.77,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -45.3,
+  "nmr_median_db": -231.0,
+  "nmr_worst_db": -20.8
+ },
+ "meander-sq-bl-exact": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -94.1,
+  "nmr_median_db": -89.9,
+  "nmr_worst_db": -80.6
+ },
+ "meander-tri-bl-exact": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -94.1,
+  "nmr_median_db": -89.9,
+  "nmr_worst_db": -80.6
+ },
+ "meander-sq-mip-table": {
+  "env_mean_db": 2.63,
+  "env_max_db": 30.41,
+  "spur_median_db": -81.6,
+  "spur_worst_db": -33.8,
+  "nmr_median_db": -3.8,
+  "nmr_worst_db": 8.9
+ },
+ "meander-sq-mip-lin": {
+  "env_mean_db": 1.03,
+  "env_max_db": 61.56,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -53.6,
+  "nmr_median_db": -23.2,
+  "nmr_worst_db": -15.4
+ },
+ "meander-sq-blep": {
+  "env_mean_db": 2.51,
+  "env_max_db": 33.98,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -25.9,
+  "nmr_median_db": -3.4,
+  "nmr_worst_db": 2.6
+ },
+ "cr-rt-full": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-inc": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-inc-1db": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-inc-m2": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-nn": {
+  "env_mean_db": 1.44,
+  "env_max_db": 23.68,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -29.3,
+  "nmr_median_db": -8.1,
+  "nmr_worst_db": 3.6
+ },
+ "kl-lattice-csd3": {
+  "env_mean_db": 1.25,
+  "env_max_db": 6.96,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -32.5,
+  "nmr_median_db": -13.6,
+  "nmr_worst_db": -8.9
+ },
+ "lsp-allpass-csd3": {
+  "env_mean_db": 1.43,
+  "env_max_db": 6.92,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -31.6,
+  "nmr_median_db": -12.9,
+  "nmr_worst_db": -7.5
+ },
+ "lsp-allpass-csd2": {
+  "env_mean_db": 3.85,
+  "env_max_db": 27.61,
+  "spur_median_db": -32.6,
+  "spur_worst_db": -1.2,
+  "nmr_median_db": -3.4,
+  "nmr_worst_db": 11.2
+ },
+ "svf-csd3": {
+  "env_mean_db": 1.41,
+  "env_max_db": 7.43,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -33.4,
+  "nmr_median_db": -13.5,
+  "nmr_worst_db": -8.3
+ },
+ "svf-csd2": {
+  "env_mean_db": 3.19,
+  "env_max_db": 15.24,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -33.2,
+  "nmr_median_db": -7.7,
+  "nmr_worst_db": -0.9
+ },
+ "parallel-sos-csd3": {
+  "env_mean_db": 1.26,
+  "env_max_db": 8.0,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -32.3,
+  "nmr_median_db": -14.3,
+  "nmr_worst_db": -7.5
+ },
+ "parallel-sos-noise": {
+  "env_mean_db": 3.96,
+  "env_max_db": 28.36,
+  "spur_median_db": -41.1,
+  "spur_worst_db": -24.3,
+  "nmr_median_db": -6.1,
+  "nmr_worst_db": 2.6
+ },
+ "ks-period-iir": {
+  "env_mean_db": 1.2,
+  "env_max_db": 6.82,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -32.1,
+  "nmr_median_db": -13.9,
+  "nmr_worst_db": -8.3
+ }
+}

@@ -1,0 +1,13 @@
+update,engine,click_ratio,max_jump_over_rms
+50Hz,reference,2.4,2.545
+50Hz,impulse-iir,2.11,2.503
+50Hz,impulse-iir-csd-sos,2.11,2.508
+50Hz,kl-lattice-csd3,2.1,2.461
+50Hz,lsp-allpass-csd3,2.04,2.499
+50Hz,svf-csd3,1.97,2.304
+100Hz,reference,2.19,2.437
+100Hz,impulse-iir,2.11,2.503
+100Hz,impulse-iir-csd-sos,2.12,2.508
+100Hz,kl-lattice-csd3,2.1,2.461
+100Hz,lsp-allpass-csd3,2.04,2.499
+100Hz,svf-csd3,2.19,2.573
