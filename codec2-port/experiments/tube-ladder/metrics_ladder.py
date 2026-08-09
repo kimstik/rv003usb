@@ -58,6 +58,25 @@ def find_lag(ref, x, max_lag=240):
     return blag
 
 
+def find_lag_lsd(ref, x, max_lag=96, fine=8):
+    """Constant lag minimising mean frame LSD (coarse step `fine`, then +-1).
+
+    The envelope-xcorr lag proved too flat/biased on parametric speech (its
+    optimum sat ~1 dB LSD away from the true minimum on hts1a), so the
+    published metrics use the metric-optimal constant lag per pair — the
+    best-case single-delay alignment, applied identically to every rung.
+    """
+    def lsd_at(lag):
+        r, y = apply_lag(ref, x, lag)
+        return lsd_stats(y, r)["lsd_mean"]
+
+    coarse = range(-max_lag, max_lag + 1, fine)
+    lag0 = min(coarse, key=lsd_at)
+    finer = range(max(-max_lag, lag0 - fine + 1),
+                  min(max_lag, lag0 + fine - 1) + 1)
+    return min(finer, key=lsd_at)
+
+
 def apply_lag(ref, x, lag):
     """Trim both signals so x delayed by `lag` aligns with ref."""
     if lag >= 0:
@@ -161,3 +180,37 @@ def estoi(ref, test):
     from pystoi import stoi
     n = min(len(ref), len(test))
     return float(stoi(ref[:n], test[:n], FS, extended=True))
+
+
+def crest_stats(x, ref, frame_ms=20.0, hop_ms=10.0):
+    """Per-frame crest factor (peak/RMS, dB) delta vs reference.
+
+    LSD/NMR are magnitude-domain and phase-blind, but LPC-10e 'buzz' is
+    largely a TIME-domain property: a naked impulse train through a min-phase
+    filter is much peakier than the phase0 sinusoidal sum.  The pulse
+    dispersion rung exists precisely to fix this, so measure it in its own
+    domain: crest_delta = median over active frames of
+    (crest_dB(tube frame) - crest_dB(ref frame)).  ~0 = same temporal
+    texture as the reference; >0 = peakier (buzzier excitation).
+    """
+    n_len = int(FS * frame_ms / 1000)
+    hop = int(FS * hop_ms / 1000)
+    n = min(len(x), len(ref))
+    rms_all = np.sqrt(np.mean(ref[:n] ** 2)) + 1e-12
+    floor = rms_all * 10 ** (-30.0 / 20)
+    deltas = []
+    for start in range(0, n - n_len + 1, hop):
+        r = ref[start:start + n_len]
+        rr = np.sqrt(np.mean(r ** 2))
+        if rr < floor:
+            continue
+        t = x[start:start + n_len]
+        tr = np.sqrt(np.mean(t ** 2)) + 1e-12
+        c_r = 20 * np.log10(np.max(np.abs(r)) / rr + 1e-12)
+        c_t = 20 * np.log10(np.max(np.abs(t)) / tr + 1e-12)
+        deltas.append(c_t - c_r)
+    v = np.array(deltas)
+    if v.size == 0:
+        return {"crest_delta_median": np.nan, "crest_delta_p90": np.nan}
+    return {"crest_delta_median": float(np.median(v)),
+            "crest_delta_p90": float(np.percentile(v, 90))}

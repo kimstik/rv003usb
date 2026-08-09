@@ -85,12 +85,28 @@ def main():
             write_wav(os.path.join(wav_dir, f"{cond}_{utt}_ref.wav"), ref)
             write_wav(os.path.join(wav_dir, f"{cond}_{utt}_orig.wav"), orig)
 
-            # context row: how far the reference itself is from the original
+            # context rows: (a) reference vs original — the codec's own
+            # distance from clean speech on the same metrics; (b) for q1300,
+            # quantised ref vs unquantised ref — the size of pure
+            # quantisation+decimation distortion on this LSD scale.
             e_ref_orig = M.estoi(orig, ref)
+            lag0 = M.find_lag_lsd(orig, ref)
+            o_a, r_a = M.apply_lag(orig, ref, lag0)
+            row = {"cond": cond, "utt": utt, "variant": "REF-vs-ORIG",
+                   "lag": lag0}
+            row.update(M.lsd_stats(r_a, o_a))
+            row.update(M.nmr_proxy_stats(r_a, o_a, params["ak"],
+                                         lag0 if lag0 > 0 else 0))
+            row.update(M.seg_snr(o_a, r_a))
+            row.update(M.crest_stats(r_a, o_a))
+            row["estoi_ref"] = float("nan")
+            row["estoi_orig"] = e_ref_orig
+            row["estoi_ref_vs_orig"] = e_ref_orig
+            rows.append(row)
 
             for name, kw in VARIANTS:
                 y = tube.synth_ladder(params, **kw)
-                lag = M.find_lag(ref, y)          # >0: tube early vs ref
+                lag = M.find_lag_lsd(ref, y)      # >0: tube early vs ref
                 ref_a, y_a = M.apply_lag(ref, y, lag)
                 # dump-frame offset of aligned position p: p + lag_trim
                 ref_off = lag if lag > 0 else 0
@@ -100,6 +116,7 @@ def main():
                 row.update(M.nmr_proxy_stats(y_a, ref_a, params["ak"],
                                              ref_off))
                 row.update(M.seg_snr(ref_a, y_a))
+                row.update(M.crest_stats(y_a, ref_a))
                 row["estoi_ref"] = M.estoi(ref_a, y_a)
                 n = min(len(orig), len(y))
                 row["estoi_orig"] = M.estoi(orig[:n], y[:n])
@@ -110,7 +127,7 @@ def main():
                 print(f"{cond:6s} {utt:11s} {name:8s} lag {lag:4d} "
                       f"LSD {row['lsd_mean']:.2f} dB  "
                       f"NMR {row['nmr_median']:+.1f} dB  "
-                      f"segSNR {row['segsnr_mean']:.1f} dB  "
+                      f"crest {row['crest_delta_median']:+.1f} dB  "
                       f"ESTOI(ref) {row['estoi_ref']:.3f}  "
                       f"ESTOI(orig) {row['estoi_orig']:.3f} "
                       f"[ref itself: {e_ref_orig:.3f}]", flush=True)
@@ -134,8 +151,8 @@ def main():
             agg[cond][name] = {
                 k: float(np.mean([r[k] for r in sel]))
                 for k in ("lsd_mean", "lsd_median", "lsd_p90", "nmr_median",
-                          "nmr_p90", "segsnr_mean", "estoi_ref", "estoi_orig",
-                          "estoi_ref_vs_orig")}
+                          "nmr_p90", "segsnr_mean", "crest_delta_median",
+                          "estoi_ref", "estoi_orig", "estoi_ref_vs_orig")}
     with open(os.path.join(results_dir, "aggregate.json"), "w") as f:
         json.dump(agg, f, indent=1)
     print(f"\nwrote {csvp} and aggregate.json; wavs in {wav_dir}")

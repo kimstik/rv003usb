@@ -1,0 +1,8 @@
+rung,MHz_P1_mul,MHz_P2_csd,note
+L0,0.461,0.837,impulse train / LFSR noise -> LPC-IIR(10); bake-off impulse-iir + noise source
+L1 delta (worst F0=400Hz),0.208,0.416,"stamp 65-tap dispersed pulse, 2 stamps/period, P=20"
+L1 delta (typ F0=100Hz),0.052,0.104,"stamp 65-tap dispersed pulse, 2 stamps/period, P=80"
+L2 delta,0.296,0.584,2 fixed biquads (power-complementary crossover) + LFSR on voiced + noise gain
+L3 delta,0.004,0.005,per-period jitter draw on weakly-voiced frames
+L4 delta,0.753,1.506,A(z/g1)/A(z/g2) + tilt + per-frame AGC; coeff scaling via g^k tables
+CUMULATIVE_L0..L4_worst,1.722,3.348,sum of worst-case deltas
