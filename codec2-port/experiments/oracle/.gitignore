@@ -1,0 +1,6 @@
+# Everything generated lives under build/ (codec2 clone, cmake build, dumps).
+build/
+__pycache__/
+*.npz
+*.raw
+*.c2
