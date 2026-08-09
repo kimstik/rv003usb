@@ -214,11 +214,17 @@ def synth_meander_blep(frames):
 #   * no double buffer, no crossfade: updates are <= eps by construction.
 
 def _nt_for_L(L):
-    if L <= 24:
+    """Table length ~ 4-5x the harmonic count: keeps the top harmonic at
+    <= ~0.25 cycles/entry so linear interp droop stays sub-dB.  (The first
+    red-team pass used 2.5x brackets and paid up to 20 dB at the top
+    harmonics -- same lesson as round-1's 2x-oversampled variant.)"""
+    if L <= 16:
         return 64
-    if L <= 52:
+    if L <= 32:
         return 128
-    return 256
+    if L <= 64:
+        return 256
+    return 512
 
 
 def synth_cycle_replay_rt(frames, eps_db=0.5, update_every=1, interp="linear",
@@ -759,15 +765,21 @@ def _shift_mul(s, coeff_terms, mode):
 
 def synth_sos_csd_q15(frames, order=10, csd_terms=3, mode="round",
                       dither_seed=99, level_scale=0.25, tail_frames=0,
-                      return_int=False):
+                      return_int=False, guard_bits=0):
     """Q15 golden model of the round-1 winner.  level_scale scales the
     excitation (peak output ~= level_scale of full scale).  tail_frames
     appends zero-excitation frames (idle-channel / limit-cycle probe).
-    Returns float signal in full-scale units (1.0 = int16 32767)."""
+    guard_bits g: section state kept in int32 with g fractional guard bits
+    below the Q15 LSB (free on a 32-bit core: registers are 32-bit anyway,
+    costs only 2 B RAM per state half that was int16).  g=0 is the naive
+    int16-state design.  Returns float signal in full-scale units."""
     exci = _Exciter()
     rng = np.random.default_rng(dither_seed)
     nsec = order // 2
     st = [[0, 0] for _ in range(nsec)]
+    gb = guard_bits
+    sat_hi = (32767 << gb)
+    sat_lo = -(32768 << gb)
     out = []
     frames_ext = list(frames)
     if tail_frames:
@@ -796,11 +808,10 @@ def synth_sos_csd_q15(frames, order=10, csd_terms=3, mode="round",
         g = _frame_gain(a_use, G, Wo, L, f["A"])
         if f.get("_silent"):
             exc = np.zeros(N)
-            exci.phase = exci.phase  # keep exciter frozen
         else:
             exc = exci.frame(N, TWO_PI / Wo, g)
         # normalize drive so float output peak ~= level_scale
-        exc_i = np.round(exc * level_scale * 32768.0).astype(np.int64)
+        exc_i = np.round(exc * level_scale * 32768.0 * (1 << gb)).astype(np.int64)
         y = np.zeros(N)
         for n in range(N):
             x = int(exc_i[n])
@@ -809,13 +820,12 @@ def synth_sos_csd_q15(frames, order=10, csd_terms=3, mode="round",
                 v = x - _shift_mul(s0, t1, mode) - _shift_mul(s1, t2, mode)
                 if mode == "dither":
                     v += int(rng.integers(0, 2)) - int(rng.integers(0, 2))
-                # saturate to int16
-                v = max(-32768, min(32767, v))
+                v = max(sat_lo, min(sat_hi, v))
                 st[si][1] = s0
                 st[si][0] = v
                 x = v
             y[n] = x
-        out.append(y / 32768.0)
+        out.append(y / (32768.0 * (1 << gb)))
     if return_int:
         return np.concatenate(out) * 32768.0
     return np.concatenate(out)

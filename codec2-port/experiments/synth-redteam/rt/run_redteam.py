@@ -293,9 +293,10 @@ def run_q15():
         xf = synth_impulse_iir(frames, csd=True, csd_terms=3, csd_form="sos")
         for level_db in (-12.0, -48.0):
             scale = 10 ** (level_db / 20.0)
-            for mode in ("trunc", "round", "dither"):
+            for mode, gb in (("trunc", 0), ("round", 0), ("dither", 0),
+                             ("trunc", 8), ("round", 8)):
                 x = synth_sos_csd_q15(frames, mode=mode, level_scale=scale,
-                                      tail_frames=tail_frames)
+                                      tail_frames=tail_frames, guard_bits=gb)
                 n_sig = sum(f["N"] for f in frames)
                 sig = x[:n_sig]
                 ref = xf * scale
@@ -306,9 +307,10 @@ def run_q15():
                 tail = x[n_sig + 10 * 160:]       # skip decay, keep last part
                 ta = _tail_analysis(tail)
                 rows.append({"case": f"{env_name}-{f0}", "level_db": level_db,
-                             "mode": mode, "snr_db": round(float(snr), 1),
+                             "mode": f"{mode}-g{gb}" if gb else mode,
+                             "snr_db": round(float(snr), 1),
                              **{f"idle_{k}": v for k, v in ta.items()}})
-                print(f"[q15] {env_name}-{f0} {level_db}dB {mode}: "
+                print(f"[q15] {env_name}-{f0} {level_db}dB {mode}-g{gb}: "
                       f"snr {snr:.1f} idle_rms {ta['rms_lsb']} LSB "
                       f"tone {ta['tone_db']} dB @ {ta['tone_hz']} Hz", flush=True)
     with open(os.path.join(RESULTS, "q15_idle.csv"), "w", newline="") as fh:

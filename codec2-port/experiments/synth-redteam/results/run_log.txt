@@ -1,0 +1,640 @@
+[std] aa-50 done
+[std] aa-80 done
+[std] aa-120 done
+[std] aa-180 done
+[std] aa-250 done
+[std] aa-330 done
+[std] aa-400 done
+[std] iy-50 done
+[std] iy-80 done
+[std] iy-120 done
+[std] iy-180 done
+[std] iy-250 done
+[std] iy-330 done
+[std] iy-400 done
+[std] uw-50 done
+[std] uw-80 done
+[std] uw-120 done
+[std] uw-180 done
+[std] uw-250 done
+[std] uw-330 done
+[std] uw-400 done
+{
+ "osc-bank": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -94.3,
+  "nmr_median_db": -94.0,
+  "nmr_worst_db": -88.6
+ },
+ "impulse-iir": {
+  "env_mean_db": 1.17,
+  "env_max_db": 6.62,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -32.5,
+  "nmr_median_db": -14.1,
+  "nmr_worst_db": -8.4
+ },
+ "impulse-iir-csd-sos": {
+  "env_mean_db": 1.36,
+  "env_max_db": 7.48,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -32.0,
+  "nmr_median_db": -14.1,
+  "nmr_worst_db": 1.7
+ },
+ "meander-sq": {
+  "env_mean_db": 6.18,
+  "env_max_db": 42.31,
+  "spur_median_db": -57.0,
+  "spur_worst_db": -16.4,
+  "nmr_median_db": 12.6,
+  "nmr_worst_db": 19.2
+ },
+ "meander-tri": {
+  "env_mean_db": 6.66,
+  "env_max_db": 40.93,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -29.9,
+  "nmr_median_db": 10.4,
+  "nmr_worst_db": 17.4
+ },
+ "cycle-replay": {
+  "env_mean_db": 0.66,
+  "env_max_db": 6.75,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -31.9,
+  "nmr_median_db": -227.1,
+  "nmr_worst_db": -10.5
+ },
+ "cycle-replay-2x": {
+  "env_mean_db": 0.17,
+  "env_max_db": 1.77,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -45.3,
+  "nmr_median_db": -231.0,
+  "nmr_worst_db": -20.8
+ },
+ "meander-sq-bl-exact": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -94.1,
+  "nmr_median_db": -89.9,
+  "nmr_worst_db": -80.6
+ },
+ "meander-tri-bl-exact": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -94.1,
+  "nmr_median_db": -89.9,
+  "nmr_worst_db": -80.6
+ },
+ "meander-sq-mip-table": {
+  "env_mean_db": 2.63,
+  "env_max_db": 30.41,
+  "spur_median_db": -81.6,
+  "spur_worst_db": -33.8,
+  "nmr_median_db": -3.8,
+  "nmr_worst_db": 8.9
+ },
+ "meander-sq-mip-lin": {
+  "env_mean_db": 1.03,
+  "env_max_db": 61.56,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -53.6,
+  "nmr_median_db": -23.2,
+  "nmr_worst_db": -15.4
+ },
+ "meander-sq-blep": {
+  "env_mean_db": 2.51,
+  "env_max_db": 33.98,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -25.9,
+  "nmr_median_db": -3.4,
+  "nmr_worst_db": 2.6
+ },
+ "cr-rt-full": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-inc": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-inc-1db": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-inc-m2": {
+  "env_mean_db": 0.15,
+  "env_max_db": 2.15,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -50.8,
+  "nmr_median_db": -33.8,
+  "nmr_worst_db": -24.7
+ },
+ "cr-rt-nn": {
+  "env_mean_db": 1.44,
+  "env_max_db": 23.68,
+  "spur_median_db": -94.5,
+  "spur_worst_db": -29.3,
+  "nmr_median_db": -8.1,
+  "nmr_worst_db": 3.6
+ },
+ "kl-lattice-csd3": {
+  "env_mean_db": 1.25,
+  "env_max_db": 6.96,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -32.5,
+  "nmr_median_db": -13.6,
+  "nmr_worst_db": -8.9
+ },
+ "lsp-allpass-csd3": {
+  "env_mean_db": 1.43,
+  "env_max_db": 6.92,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -31.6,
+  "nmr_median_db": -12.9,
+  "nmr_worst_db": -7.5
+ },
+ "lsp-allpass-csd2": {
+  "env_mean_db": 3.85,
+  "env_max_db": 27.61,
+  "spur_median_db": -32.6,
+  "spur_worst_db": -1.2,
+  "nmr_median_db": -3.4,
+  "nmr_worst_db": 11.2
+ },
+ "svf-csd3": {
+  "env_mean_db": 1.41,
+  "env_max_db": 7.43,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -33.4,
+  "nmr_median_db": -13.5,
+  "nmr_worst_db": -8.3
+ },
+ "svf-csd2": {
+  "env_mean_db": 3.19,
+  "env_max_db": 15.24,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -33.2,
+  "nmr_median_db": -7.7,
+  "nmr_worst_db": -0.9
+ },
+ "parallel-sos-csd3": {
+  "env_mean_db": 1.26,
+  "env_max_db": 8.0,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -32.3,
+  "nmr_median_db": -14.3,
+  "nmr_worst_db": -7.5
+ },
+ "parallel-sos-noise": {
+  "env_mean_db": 3.96,
+  "env_max_db": 28.36,
+  "spur_median_db": -41.1,
+  "spur_worst_db": -24.3,
+  "nmr_median_db": -6.1,
+  "nmr_worst_db": 2.6
+ },
+ "ks-period-iir": {
+  "env_mean_db": 1.2,
+  "env_max_db": 6.82,
+  "spur_median_db": -94.6,
+  "spur_worst_db": -32.1,
+  "nmr_median_db": -13.9,
+  "nmr_worst_db": -8.3
+ }
+}
+[stress] cf-80 done
+[stress] cf-120 done
+[stress] cf-250 done
+[stress] cf-350 done
+[stress] cf-380 done
+[stress] cf-400 done
+[stress] nf-80 done
+[stress] nf-120 done
+[stress] nf-250 done
+[stress] nf-350 done
+[stress] nf-380 done
+[stress] nf-400 done
+[stress] nfhi-80 done
+[stress] nfhi-120 done
+[stress] nfhi-250 done
+[stress] nfhi-350 done
+[stress] nfhi-380 done
+[stress] nfhi-400 done
+{
+ "osc-bank": {
+  "env_mean_db": 0.0,
+  "env_max_db": 0.0,
+  "spur_median_db": -94.7,
+  "spur_worst_db": -94.3,
+  "nmr_median_db": -93.1,
+  "nmr_worst_db": -86.8
+ },
+ "impulse-iir": {
+  "env_mean_db": 2.19,
+  "env_max_db": 12.43,
+  "spur_median_db": -68.3,
+  "spur_worst_db": -11.3,
+  "nmr_median_db": -8.5,
+  "nmr_worst_db": 3.5
+ },
+ "impulse-iir-csd-sos": {
+  "env_mean_db": 2.21,
+  "env_max_db": 16.04,
+  "spur_median_db": -68.5,
+  "spur_worst_db": -9.0,
+  "nmr_median_db": -8.7,
+  "nmr_worst_db": 9.6
+ },
+ "kl-lattice-csd3": {
+  "env_mean_db": 2.24,
+  "env_max_db": 13.16,
+  "spur_median_db": -67.6,
+  "spur_worst_db": -11.4,
+  "nmr_median_db": -8.9,
+  "nmr_worst_db": 5.4
+ },
+ "lsp-allpass-csd3": {
+  "env_mean_db": 2.4,
+  "env_max_db": 14.26,
+  "spur_median_db": -67.9,
+  "spur_worst_db": -12.3,
+  "nmr_median_db": -8.5,
+  "nmr_worst_db": 5.8
+ },
+ "svf-csd3": {
+  "env_mean_db": 2.33,
+  "env_max_db": 12.46,
+  "spur_median_db": -68.3,
+  "spur_worst_db": -10.9,
+  "nmr_median_db": -8.5,
+  "nmr_worst_db": 3.4
+ },
+ "parallel-sos-csd3": {
+  "env_mean_db": 2.66,
+  "env_max_db": 17.87,
+  "spur_median_db": -68.7,
+  "spur_worst_db": -10.6,
+  "nmr_median_db": -7.9,
+  "nmr_worst_db": 11.5
+ }
+}
+[dyn] osc-bank done
+[dyn] impulse-iir done
+[dyn] impulse-iir-csd-sos done
+[dyn] meander-sq done
+[dyn] meander-tri done
+[dyn] cycle-replay done
+[dyn] cycle-replay-2x done
+[dyn] meander-sq-bl-exact done
+[dyn] meander-tri-bl-exact done
+[dyn] meander-sq-mip-table done
+[dyn] meander-sq-mip-lin done
+[dyn] meander-sq-blep done
+[dyn] cr-rt-full done
+[dyn] cr-rt-inc done
+[dyn] cr-rt-inc-1db done
+[dyn] cr-rt-inc-m2 done
+[dyn] cr-rt-nn done
+[dyn] kl-lattice-csd3 done
+[dyn] lsp-allpass-csd3 done
+[dyn] lsp-allpass-csd2 done
+[dyn] svf-csd3 done
+[dyn] svf-csd2 done
+[dyn] parallel-sos-csd3 done
+[dyn] parallel-sos-noise done
+[dyn] ks-period-iir done
+[subframe 50Hz] impulse-iir done
+[subframe 50Hz] impulse-iir-csd-sos done
+[subframe 50Hz] kl-lattice-csd3 done
+[subframe 50Hz] lsp-allpass-csd3 done
+[subframe 50Hz] svf-csd3 done
+[subframe 100Hz] impulse-iir done
+[subframe 100Hz] impulse-iir-csd-sos done
+[subframe 100Hz] kl-lattice-csd3 done
+[subframe 100Hz] lsp-allpass-csd3 done
+[subframe 100Hz] svf-csd3 done
+[real] osc-bank done
+[real] impulse-iir done
+[real] impulse-iir-csd-sos done
+[real] meander-sq done
+[real] meander-tri done
+[real] cycle-replay done
+[real] cycle-replay-2x done
+[real] meander-sq-bl-exact done
+[real] meander-tri-bl-exact done
+[real] meander-sq-mip-table done
+[real] meander-sq-mip-lin done
+[real] meander-sq-blep done
+[real] cr-rt-full done
+[real] cr-rt-inc done
+[real] cr-rt-inc-1db done
+[real] cr-rt-inc-m2 done
+[real] cr-rt-nn done
+[real] kl-lattice-csd3 done
+[real] lsp-allpass-csd3 done
+[real] lsp-allpass-csd2 done
+[real] svf-csd3 done
+[real] svf-csd2 done
+[real] parallel-sos-csd3 done
+[real] parallel-sos-noise done
+[real] ks-period-iir done
+[cr-stats] {"eps0.25": {"updates_per_frame_mean": 38.3, "L_mean": 40.3, "update_fraction": 0.95}, "eps0.5": {"updates_per_frame_mean": 36.8, "L_mean": 40.3, "update_fraction": 0.912}, "eps1.0": {"updates_per_frame_mean": 33.5, "L_mean": 40.3, "update_fraction": 0.832}}
+[q15] aa-120 -12.0dB trunc-g0: snr 51.0 idle_rms 18.05 LSB tone 61.0 dB @ 1137.0 Hz
+[q15] aa-120 -12.0dB round-g0: snr 51.3 idle_rms 18.36 LSB tone 158.6 dB @ 1143.0 Hz
+[q15] aa-120 -12.0dB dither-g0: snr 47.4 idle_rms 31.65 LSB tone 48.7 dB @ 728.0 Hz
+[q15] aa-120 -12.0dB trunc-g8: snr 98.4 idle_rms 0.1 LSB tone 124.3 dB @ 667.0 Hz
+[q15] aa-120 -12.0dB round-g8: snr 98.8 idle_rms 0.07 LSB tone 151.4 dB @ 1143.0 Hz
+[q15] aa-120 -48.0dB trunc-g0: snr 14.4 idle_rms 23.17 LSB tone 98.4 dB @ 667.0 Hz
+[q15] aa-120 -48.0dB round-g0: snr 16.3 idle_rms 9.66 LSB tone 123.6 dB @ 1143.0 Hz
+[q15] aa-120 -48.0dB dither-g0: snr 11.3 idle_rms 31.65 LSB tone 48.7 dB @ 728.0 Hz
+[q15] aa-120 -48.0dB trunc-g8: snr 65.0 idle_rms 0.09 LSB tone 98.4 dB @ 667.0 Hz
+[q15] aa-120 -48.0dB round-g8: snr 63.8 idle_rms 0.04 LSB tone 108.7 dB @ 1112.0 Hz
+[q15] iy-120 -12.0dB trunc-g0: snr 31.9 idle_rms 265.24 LSB tone 147.1 dB @ 222.0 Hz
+[q15] iy-120 -12.0dB round-g0: snr 35.7 idle_rms 55.69 LSB tone 134.7 dB @ 258.0 Hz
+[q15] iy-120 -12.0dB dither-g0: snr 34.7 idle_rms 87.2 LSB tone 55.8 dB @ 333.0 Hz
+[q15] iy-120 -12.0dB trunc-g8: snr 80.5 idle_rms 1.1 LSB tone 168.3 dB @ 333.0 Hz
+[q15] iy-120 -12.0dB round-g8: snr 87.3 idle_rms 0.16 LSB tone 142.9 dB @ 382.0 Hz
+[q15] iy-120 -48.0dB trunc-g0: snr -7.5 idle_rms 269.37 LSB tone 168.0 dB @ 400.0 Hz
+[q15] iy-120 -48.0dB round-g0: snr 5.1 idle_rms 41.37 LSB tone 143.1 dB @ 382.0 Hz
+[q15] iy-120 -48.0dB dither-g0: snr 0.2 idle_rms 90.02 LSB tone 56.5 dB @ 333.0 Hz
+[q15] iy-120 -48.0dB trunc-g8: snr 43.1 idle_rms 1.04 LSB tone 131.5 dB @ 428.0 Hz
+[q15] iy-120 -48.0dB round-g8: snr 48.9 idle_rms 0.22 LSB tone 135.0 dB @ 258.0 Hz
+[q15] nf-120 -12.0dB trunc-g0: snr 37.9 idle_rms 79.2 LSB tone 162.0 dB @ 615.0 Hz
+[q15] nf-120 -12.0dB round-g0: snr 43.1 idle_rms 30.33 LSB tone 96.6 dB @ 500.0 Hz
+[q15] nf-120 -12.0dB dither-g0: snr 41.1 idle_rms 49.08 LSB tone 50.3 dB @ 435.0 Hz
+[q15] nf-120 -12.0dB trunc-g8: snr 85.9 idle_rms 0.55 LSB tone 156.3 dB @ 667.0 Hz
+[q15] nf-120 -12.0dB round-g8: snr 92.6 idle_rms 0.13 LSB tone 68.4 dB @ 472.0 Hz
+[q15] nf-120 -48.0dB trunc-g0: snr 0.5 idle_rms 139.62 LSB tone 158.4 dB @ 667.0 Hz
+[q15] nf-120 -48.0dB round-g0: snr 7.1 idle_rms 30.23 LSB tone 96.7 dB @ 500.0 Hz
+[q15] nf-120 -48.0dB dither-g0: snr 5.2 idle_rms 48.65 LSB tone 51.9 dB @ 437.0 Hz
+[q15] nf-120 -48.0dB trunc-g8: snr 50.5 idle_rms 0.31 LSB tone 161.7 dB @ 615.0 Hz
+[q15] nf-120 -48.0dB round-g8: snr 57.1 idle_rms 0.12 LSB tone 96.7 dB @ 500.0 Hz
+[q15] nf-80 -12.0dB trunc-g0: snr 43.7 idle_rms 47.87 LSB tone 105.7 dB @ 382.0 Hz
+[q15] nf-80 -12.0dB round-g0: snr 48.2 idle_rms 23.15 LSB tone 83.4 dB @ 523.0 Hz
+[q15] nf-80 -12.0dB dither-g0: snr 43.9 idle_rms 51.76 LSB tone 56.4 dB @ 510.0 Hz
+[q15] nf-80 -12.0dB trunc-g8: snr 90.0 idle_rms 0.19 LSB tone 105.8 dB @ 382.0 Hz
+[q15] nf-80 -12.0dB round-g8: snr 95.9 idle_rms 0.14 LSB tone 120.8 dB @ 505.0 Hz
+[q15] nf-80 -48.0dB trunc-g0: snr 6.1 idle_rms 40.78 LSB tone 142.4 dB @ 1523.0 Hz
+[q15] nf-80 -48.0dB round-g0: snr 11.9 idle_rms 44.65 LSB tone 87.5 dB @ 505.0 Hz
+[q15] nf-80 -48.0dB dither-g0: snr 7.9 idle_rms 51.76 LSB tone 56.4 dB @ 510.0 Hz
+[q15] nf-80 -48.0dB trunc-g8: snr 55.0 idle_rms 0.19 LSB tone 105.6 dB @ 382.0 Hz
+[q15] nf-80 -48.0dB round-g8: snr 60.3 idle_rms 0.09 LSB tone 83.1 dB @ 523.0 Hz
+[q15] uw-80 -12.0dB trunc-g0: snr 38.2 idle_rms 138.96 LSB tone 155.5 dB @ 277.0 Hz
+[q15] uw-80 -12.0dB round-g0: snr 35.0 idle_rms 118.25 LSB tone 120.2 dB @ 327.0 Hz
+[q15] uw-80 -12.0dB dither-g0: snr 32.7 idle_rms 148.7 LSB tone 64.1 dB @ 335.0 Hz
+[q15] uw-80 -12.0dB trunc-g8: snr 84.5 idle_rms 0.47 LSB tone 159.5 dB @ 445.0 Hz
+[q15] uw-80 -12.0dB round-g8: snr 81.1 idle_rms 0.38 LSB tone 150.2 dB @ 250.0 Hz
+[q15] uw-80 -48.0dB trunc-g0: snr 1.6 idle_rms 120.35 LSB tone 159.6 dB @ 445.0 Hz
+[q15] uw-80 -48.0dB round-g0: snr 4.2 idle_rms 104.32 LSB tone 96.0 dB @ 417.0 Hz
+[q15] uw-80 -48.0dB dither-g0: snr -1.5 idle_rms 148.89 LSB tone 64.1 dB @ 335.0 Hz
+[q15] uw-80 -48.0dB trunc-g8: snr 50.0 idle_rms 0.47 LSB tone 159.0 dB @ 445.0 Hz
+[q15] uw-80 -48.0dB round-g8: snr 46.4 idle_rms 0.39 LSB tone 68.3 dB @ 917.0 Hz
+[wave2-sd] std aa done
+[wave2-sd] std iy done
+[wave2-sd] std uw done
+[wave2-sd] stress cf done
+[wave2-sd] stress nf done
+[wave2-sd] stress nfhi done
+{
+ "std/sos-2t": {
+  "sd_med": 2.17,
+  "sd_worst": 4.05,
+  "sdmax_worst": 12.14,
+  "pct_unstable": 0.0
+ },
+ "std/sos-3t": {
+  "sd_med": 0.42,
+  "sd_worst": 0.97,
+  "sdmax_worst": 2.3,
+  "pct_unstable": 0.0
+ },
+ "std/sos-4t": {
+  "sd_med": 0.08,
+  "sd_worst": 0.24,
+  "sdmax_worst": 0.89,
+  "pct_unstable": 0.0
+ },
+ "std/lattice-2t": {
+  "sd_med": 1.52,
+  "sd_worst": 2.81,
+  "sdmax_worst": 9.04,
+  "pct_unstable": 0.0
+ },
+ "std/lattice-3t": {
+  "sd_med": 0.2,
+  "sd_worst": 0.43,
+  "sdmax_worst": 1.26,
+  "pct_unstable": 0.0
+ },
+ "std/lattice-4t": {
+  "sd_med": 0.04,
+  "sd_worst": 0.14,
+  "sdmax_worst": 0.37,
+  "pct_unstable": 0.0
+ },
+ "std/svf-1t": {
+  "sd_med": 14.33,
+  "sd_worst": 35.51,
+  "sdmax_worst": 71.41,
+  "pct_unstable": 0.0
+ },
+ "std/svf-2t": {
+  "sd_med": 2.59,
+  "sd_worst": 4.66,
+  "sdmax_worst": 10.78,
+  "pct_unstable": 0.0
+ },
+ "std/svf-3t": {
+  "sd_med": 0.7,
+  "sd_worst": 1.59,
+  "sdmax_worst": 4.49,
+  "pct_unstable": 0.0
+ },
+ "std/lsp-allpass-2t": {
+  "sd_med": 2.08,
+  "sd_worst": 4.72,
+  "sdmax_worst": 25.06,
+  "pct_unstable": 0.0
+ },
+ "std/lsp-allpass-3t": {
+  "sd_med": 0.35,
+  "sd_worst": 1.04,
+  "sdmax_worst": 3.81,
+  "pct_unstable": 0.0
+ },
+ "std/parallel-3t": {
+  "sd_med": 1.14,
+  "sd_worst": 11.36,
+  "sdmax_worst": 21.28,
+  "pct_unstable": 0.0
+ },
+ "std/parallel-4t": {
+  "sd_med": 0.32,
+  "sd_worst": 4.43,
+  "sdmax_worst": 10.32,
+  "pct_unstable": 0.0
+ },
+ "stress/sos-2t": {
+  "sd_med": 2.43,
+  "sd_worst": 4.39,
+  "sdmax_worst": 14.57,
+  "pct_unstable": 0.0
+ },
+ "stress/sos-3t": {
+  "sd_med": 0.44,
+  "sd_worst": 1.32,
+  "sdmax_worst": 3.85,
+  "pct_unstable": 0.0
+ },
+ "stress/sos-4t": {
+  "sd_med": 0.09,
+  "sd_worst": 0.37,
+  "sdmax_worst": 0.99,
+  "pct_unstable": 0.0
+ },
+ "stress/lattice-2t": {
+  "sd_med": 1.24,
+  "sd_worst": 3.13,
+  "sdmax_worst": 8.12,
+  "pct_unstable": 0.0
+ },
+ "stress/lattice-3t": {
+  "sd_med": 0.2,
+  "sd_worst": 0.59,
+  "sdmax_worst": 2.16,
+  "pct_unstable": 0.0
+ },
+ "stress/lattice-4t": {
+  "sd_med": 0.03,
+  "sd_worst": 0.1,
+  "sdmax_worst": 0.33,
+  "pct_unstable": 0.0
+ },
+ "stress/svf-1t": {
+  "sd_med": 18.29,
+  "sd_worst": 43.86,
+  "sdmax_worst": 77.03,
+  "pct_unstable": 0.0
+ },
+ "stress/svf-2t": {
+  "sd_med": 3.4,
+  "sd_worst": 5.32,
+  "sdmax_worst": 13.43,
+  "pct_unstable": 0.0
+ },
+ "stress/svf-3t": {
+  "sd_med": 0.47,
+  "sd_worst": 1.44,
+  "sdmax_worst": 2.74,
+  "pct_unstable": 0.0
+ },
+ "stress/lsp-allpass-2t": {
+  "sd_med": 2.14,
+  "sd_worst": 2.79,
+  "sdmax_worst": 14.04,
+  "pct_unstable": 0.0
+ },
+ "stress/lsp-allpass-3t": {
+  "sd_med": 0.55,
+  "sd_worst": 2.05,
+  "sdmax_worst": 13.91,
+  "pct_unstable": 0.0
+ },
+ "stress/parallel-3t": {
+  "sd_med": 0.83,
+  "sd_worst": 10.43,
+  "sdmax_worst": 20.56,
+  "pct_unstable": 0.0
+ },
+ "stress/parallel-4t": {
+  "sd_med": 0.21,
+  "sd_worst": 4.0,
+  "sdmax_worst": 9.93,
+  "pct_unstable": 0.0
+ }
+}
+ALL DONE in 39s
+{
+ "lsp-pair-mid": {
+  "sd_med": 3.57,
+  "sd_worst": 4.33,
+  "sdmax_worst": 17.48
+ },
+ "lsp-pair-g0.97": {
+  "sd_med": 6.15,
+  "sd_worst": 7.23,
+  "sdmax_worst": 20.44
+ }
+}
+{
+ "sos-csd-jit": {
+  "asm_cycles_per_sample": 92,
+  "subframe_overhead_cyc": 2100,
+  "asm_mhz": 0.97,
+  "round1_model_mhz": 0.78,
+  "ratio": 1.24,
+  "flag_gt_1.5x": false
+ },
+ "sos-csd-interp": {
+  "asm_cycles_per_sample": 308,
+  "subframe_overhead_cyc": 1600,
+  "asm_mhz": 2.64,
+  "round1_model_mhz": 0.78,
+  "ratio": 3.41,
+  "flag_gt_1.5x": true
+ },
+ "osc-bank-L20": {
+  "asm_cycles_per_sample": 2935,
+  "asm_mhz": 23.48,
+  "round1_model_mhz": 20.32,
+  "ratio": 1.16,
+  "flag_gt_1.5x": false
+ },
+ "osc-bank-L80": {
+  "asm_cycles_per_sample": 11695,
+  "asm_mhz": 93.58,
+  "round1_model_mhz": 81.3,
+  "ratio": 1.15,
+  "flag_gt_1.5x": false
+ }
+}
+meander-mip-nn         L=20   MHz@mul 1.46   MHz@nomul 20.5    RAM 136 | mul is back: B*table load; solve setup kept
+meander-mip-lin        L=20   MHz@mul 2.26   MHz@nomul 40.34   RAM 136 | linear interp adds 2nd mul per basis
+meander-mip-nn         L=40   MHz@mul 2.92   MHz@nomul 41.0    RAM 256 | mul is back: B*table load; solve setup kept
+meander-mip-lin        L=40   MHz@mul 4.52   MHz@nomul 80.68   RAM 256 | linear interp adds 2nd mul per basis
+meander-mip-nn         L=80   MHz@mul 5.85   MHz@nomul 82.01   RAM 496 | mul is back: B*table load; solve setup kept
+meander-mip-lin        L=80   MHz@mul 9.05   MHz@nomul 161.37  RAM 496 | linear interp adds 2nd mul per basis
+meander-blep           L=20   MHz@mul 1.82   MHz@nomul 21.81   RAM 176 | f0=200: 21 blep-mults/smp; recips need L soft-divs/frame
+meander-blep           L=40   MHz@mul 3.62   MHz@nomul 42.66   RAM 336 | f0=100: 41 blep-mults/smp; recips need L soft-divs/frame
+meander-blep           L=80   MHz@mul 7.23   MHz@nomul 84.35   RAM 656 | f0=50: 81 blep-mults/smp; recips need L soft-divs/frame
+cr-rt-lin              L=20   MHz@mul 0.77   MHz@nomul 15.62   RAM 532 | Nt=128, measured 91% harmonics update/frame
+cr-rt-lin-sym          L=20   MHz@mul 0.42   MHz@nomul 8.32    RAM 532 | half-table odd/even split: setup /2, +2 ops/smp replay
+cr-rt-lin              L=40   MHz@mul 2.87   MHz@nomul 59.39   RAM 1044 | Nt=256, measured 91% harmonics update/frame
+cr-rt-lin-sym          L=40   MHz@mul 1.47   MHz@nomul 30.21   RAM 1044 | half-table odd/even split: setup /2, +2 ops/smp replay
+cr-rt-lin              L=80   MHz@mul 11.28  MHz@nomul 234.5   RAM 2068 | Nt=512, measured 91% harmonics update/frame
+cr-rt-lin-sym          L=80   MHz@mul 5.68   MHz@nomul 117.76  RAM 2068 | half-table odd/even split: setup /2, +2 ops/smp replay
+kl-lattice-csd3        L=any  MHz@mul 2.07   MHz@nomul 2.07    RAM 75 | setup=LSP->A->k: 10 soft-divs/subframe dominate
+svf-csd3               L=any  MHz@mul 1.24   MHz@nomul 1.24    RAM 61 | f,q from b1,b2 need sqrt per section (LUT) + same pole-pair problem
+lsp-allpass-csd3       L=any  MHz@mul 1.51   MHz@nomul 1.51    RAM 90 | cos(LSP) straight from bitstream: NO pole-pair conversion at all
+parallel-sos-csd3      L=any  MHz@mul 1.99   MHz@nomul 1.99    RAM 110 | residues need per-frame solve (est.); +LFSR noise ~3 ops/smp
+sos-csd-jit-honest     L=any  MHz@mul -      MHz@nomul 0.97    RAM 361 | 92 cyc/smp from static asm + 2100 cyc/subframe conversions
+sos-csd-interp-honest  L=any  MHz@mul -      MHz@nomul 2.64    RAM 91 | 308 cyc/smp from static asm + 1600 cyc/subframe conversions

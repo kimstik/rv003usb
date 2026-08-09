@@ -1,0 +1,32 @@
+{
+ "sos-csd-jit": {
+  "asm_cycles_per_sample": 92,
+  "subframe_overhead_cyc": 2100,
+  "asm_mhz": 0.97,
+  "round1_model_mhz": 0.78,
+  "ratio": 1.24,
+  "flag_gt_1.5x": false
+ },
+ "sos-csd-interp": {
+  "asm_cycles_per_sample": 308,
+  "subframe_overhead_cyc": 1600,
+  "asm_mhz": 2.64,
+  "round1_model_mhz": 0.78,
+  "ratio": 3.41,
+  "flag_gt_1.5x": true
+ },
+ "osc-bank-L20": {
+  "asm_cycles_per_sample": 2935,
+  "asm_mhz": 23.48,
+  "round1_model_mhz": 20.32,
+  "ratio": 1.16,
+  "flag_gt_1.5x": false
+ },
+ "osc-bank-L80": {
+  "asm_cycles_per_sample": 11695,
+  "asm_mhz": 93.58,
+  "round1_model_mhz": 81.3,
+  "ratio": 1.15,
+  "flag_gt_1.5x": false
+ }
+}

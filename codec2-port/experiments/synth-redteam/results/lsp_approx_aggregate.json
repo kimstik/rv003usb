@@ -1,0 +1,12 @@
+{
+ "lsp-pair-mid": {
+  "sd_med": 3.57,
+  "sd_worst": 4.33,
+  "sdmax_worst": 17.48
+ },
+ "lsp-pair-g0.97": {
+  "sd_med": 6.15,
+  "sd_worst": 7.23,
+  "sdmax_worst": 20.44
+ }
+}

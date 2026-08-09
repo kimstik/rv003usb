@@ -1,0 +1,158 @@
+{
+ "std/sos-2t": {
+  "sd_med": 2.17,
+  "sd_worst": 4.05,
+  "sdmax_worst": 12.14,
+  "pct_unstable": 0.0
+ },
+ "std/sos-3t": {
+  "sd_med": 0.42,
+  "sd_worst": 0.97,
+  "sdmax_worst": 2.3,
+  "pct_unstable": 0.0
+ },
+ "std/sos-4t": {
+  "sd_med": 0.08,
+  "sd_worst": 0.24,
+  "sdmax_worst": 0.89,
+  "pct_unstable": 0.0
+ },
+ "std/lattice-2t": {
+  "sd_med": 1.52,
+  "sd_worst": 2.81,
+  "sdmax_worst": 9.04,
+  "pct_unstable": 0.0
+ },
+ "std/lattice-3t": {
+  "sd_med": 0.2,
+  "sd_worst": 0.43,
+  "sdmax_worst": 1.26,
+  "pct_unstable": 0.0
+ },
+ "std/lattice-4t": {
+  "sd_med": 0.04,
+  "sd_worst": 0.14,
+  "sdmax_worst": 0.37,
+  "pct_unstable": 0.0
+ },
+ "std/svf-1t": {
+  "sd_med": 14.33,
+  "sd_worst": 35.51,
+  "sdmax_worst": 71.41,
+  "pct_unstable": 0.0
+ },
+ "std/svf-2t": {
+  "sd_med": 2.59,
+  "sd_worst": 4.66,
+  "sdmax_worst": 10.78,
+  "pct_unstable": 0.0
+ },
+ "std/svf-3t": {
+  "sd_med": 0.7,
+  "sd_worst": 1.59,
+  "sdmax_worst": 4.49,
+  "pct_unstable": 0.0
+ },
+ "std/lsp-allpass-2t": {
+  "sd_med": 2.08,
+  "sd_worst": 4.72,
+  "sdmax_worst": 25.06,
+  "pct_unstable": 0.0
+ },
+ "std/lsp-allpass-3t": {
+  "sd_med": 0.35,
+  "sd_worst": 1.04,
+  "sdmax_worst": 3.81,
+  "pct_unstable": 0.0
+ },
+ "std/parallel-3t": {
+  "sd_med": 1.14,
+  "sd_worst": 11.36,
+  "sdmax_worst": 21.28,
+  "pct_unstable": 0.0
+ },
+ "std/parallel-4t": {
+  "sd_med": 0.32,
+  "sd_worst": 4.43,
+  "sdmax_worst": 10.32,
+  "pct_unstable": 0.0
+ },
+ "stress/sos-2t": {
+  "sd_med": 2.43,
+  "sd_worst": 4.39,
+  "sdmax_worst": 14.57,
+  "pct_unstable": 0.0
+ },
+ "stress/sos-3t": {
+  "sd_med": 0.44,
+  "sd_worst": 1.32,
+  "sdmax_worst": 3.85,
+  "pct_unstable": 0.0
+ },
+ "stress/sos-4t": {
+  "sd_med": 0.09,
+  "sd_worst": 0.37,
+  "sdmax_worst": 0.99,
+  "pct_unstable": 0.0
+ },
+ "stress/lattice-2t": {
+  "sd_med": 1.24,
+  "sd_worst": 3.13,
+  "sdmax_worst": 8.12,
+  "pct_unstable": 0.0
+ },
+ "stress/lattice-3t": {
+  "sd_med": 0.2,
+  "sd_worst": 0.59,
+  "sdmax_worst": 2.16,
+  "pct_unstable": 0.0
+ },
+ "stress/lattice-4t": {
+  "sd_med": 0.03,
+  "sd_worst": 0.1,
+  "sdmax_worst": 0.33,
+  "pct_unstable": 0.0
+ },
+ "stress/svf-1t": {
+  "sd_med": 18.29,
+  "sd_worst": 43.86,
+  "sdmax_worst": 77.03,
+  "pct_unstable": 0.0
+ },
+ "stress/svf-2t": {
+  "sd_med": 3.4,
+  "sd_worst": 5.32,
+  "sdmax_worst": 13.43,
+  "pct_unstable": 0.0
+ },
+ "stress/svf-3t": {
+  "sd_med": 0.47,
+  "sd_worst": 1.44,
+  "sdmax_worst": 2.74,
+  "pct_unstable": 0.0
+ },
+ "stress/lsp-allpass-2t": {
+  "sd_med": 2.14,
+  "sd_worst": 2.79,
+  "sdmax_worst": 14.04,
+  "pct_unstable": 0.0
+ },
+ "stress/lsp-allpass-3t": {
+  "sd_med": 0.55,
+  "sd_worst": 2.05,
+  "sdmax_worst": 13.91,
+  "pct_unstable": 0.0
+ },
+ "stress/parallel-3t": {
+  "sd_med": 0.83,
+  "sd_worst": 10.43,
+  "sdmax_worst": 20.56,
+  "pct_unstable": 0.0
+ },
+ "stress/parallel-4t": {
+  "sd_med": 0.21,
+  "sd_worst": 4.0,
+  "sdmax_worst": 9.93,
+  "pct_unstable": 0.0
+ }
+}
