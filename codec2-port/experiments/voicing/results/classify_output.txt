@@ -1,0 +1,50 @@
+== (a) NACF baseline: nacf_wo > 0.2639 (clean in-sample flip 15.29%)
+   LOFO per-held-out-file flip%: ['21.2', '20.3', '19.7', '39.2', '36.2', '14.3', '12.4']
+== (b1) handrule params (t_nacf, rescue_lhr>, kill_lhr<, kill_lowpitch_lhr<): (np.float64(0.2), 10.0, -6.0, -99.0) (clean in-sample flip 11.59%)
+== (b2) depth-2 tree:
+   if (nacf_wo > 0.2639) {
+       v = (r1r0 > -0.2947);
+   } else {
+       v = (r1r0 > 0.8459);
+   }
+
+==== condition: babble20 (14025 frames)
+  nacf_baseline              flip 16.56%   confident-flip 0.671% (5364 conf frames)   CM [uv->uv 2804, uv->v 1005, v->uv 1318, v->v 8898]
+                             per-file: {'hts1_babble20': np.float64(21.33), 'hts1a_babble20': np.float64(24.0), 'hts2a_babble20': np.float64(19.0), 'kristoff_babble20': np.float64(28.8), 'testframes_700d_babble20': np.float64(28.75), 've9qrp_10s_babble20': np.float64(15.4), 've9qrp_babble20': np.float64(15.52)}
+  handrule                   flip 15.01%   confident-flip 0.447% (5364 conf frames)   CM [uv->uv 2783, uv->v 1026, v->uv 1079, v->v 9137]
+                             per-file: {'hts1_babble20': np.float64(20.0), 'hts1a_babble20': np.float64(19.0), 'hts2a_babble20': np.float64(18.67), 'kristoff_babble20': np.float64(17.2), 'testframes_700d_babble20': np.float64(21.25), 've9qrp_10s_babble20': np.float64(14.7), 've9qrp_babble20': np.float64(14.42)}
+  tree2                      flip 13.67%   confident-flip 0.541% (5364 conf frames)   CM [uv->uv 2961, uv->v 848, v->uv 1069, v->v 9147]
+                             per-file: {'hts1_babble20': np.float64(19.17), 'hts1a_babble20': np.float64(20.33), 'hts2a_babble20': np.float64(17.33), 'kristoff_babble20': np.float64(13.4), 'testframes_700d_babble20': np.float64(28.75), 've9qrp_10s_babble20': np.float64(13.9), 've9qrp_babble20': np.float64(12.98)}
+  ref_raw_snr_no_postproc    flip  9.65%   confident-flip 0.000% (5364 conf frames)   CM [uv->uv 3664, uv->v 145, v->uv 1209, v->v 9007]
+                             per-file: {'hts1_babble20': np.float64(10.5), 'hts1a_babble20': np.float64(13.33), 'hts2a_babble20': np.float64(8.67), 'kristoff_babble20': np.float64(23.6), 'testframes_700d_babble20': np.float64(12.5), 've9qrp_10s_babble20': np.float64(7.2), 've9qrp_babble20': np.float64(9.12)}
+
+==== condition: clean (14025 frames)
+  nacf_baseline              flip 15.29%   confident-flip 1.172% (6059 conf frames)   CM [uv->uv 3222, uv->v 808, v->uv 1337, v->v 8658]
+                             per-file: {'hts1': np.float64(21.0), 'hts1a': np.float64(20.0), 'hts2a': np.float64(19.67), 'kristoff': np.float64(39.2), 'testframes_700d': np.float64(35.0), 've9qrp': np.float64(13.81), 've9qrp_10s': np.float64(12.3)}
+  handrule                   flip 11.59%   confident-flip 0.908% (6059 conf frames)   CM [uv->uv 3338, uv->v 692, v->uv 934, v->v 9061]
+                             per-file: {'hts1': np.float64(13.33), 'hts1a': np.float64(13.0), 'hts2a': np.float64(14.33), 'kristoff': np.float64(7.4), 'testframes_700d': np.float64(15.0), 've9qrp': np.float64(11.45), 've9qrp_10s': np.float64(12.7)}
+  tree2                      flip  9.93%   confident-flip 1.799% (6059 conf frames)   CM [uv->uv 3341, uv->v 689, v->uv 703, v->v 9292]
+                             per-file: {'hts1': np.float64(9.33), 'hts1a': np.float64(9.33), 'hts2a': np.float64(8.0), 'kristoff': np.float64(4.6), 'testframes_700d': np.float64(35.0), 've9qrp': np.float64(10.02), 've9qrp_10s': np.float64(10.6)}
+  ref_raw_snr_no_postproc    flip 12.09%   confident-flip 0.000% (6059 conf frames)   CM [uv->uv 3833, uv->v 197, v->uv 1498, v->v 8497]
+                             per-file: {'hts1': np.float64(30.5), 'hts1a': np.float64(27.0), 'hts2a': np.float64(29.33), 'kristoff': np.float64(40.0), 'testframes_700d': np.float64(8.75), 've9qrp': np.float64(9.47), 've9qrp_10s': np.float64(7.1)}
+
+==== condition: white20 (14025 frames)
+  nacf_baseline              flip 11.66%   confident-flip 0.824% (5584 conf frames)   CM [uv->uv 4302, uv->v 932, v->uv 704, v->v 8087]
+                             per-file: {'hts1_white20': np.float64(14.67), 'hts1a_white20': np.float64(19.33), 'hts2a_white20': np.float64(15.33), 'kristoff_white20': np.float64(19.8), 'testframes_700d_white20': np.float64(28.75), 've9qrp_10s_white20': np.float64(11.9), 've9qrp_white20': np.float64(10.7)}
+  handrule                   flip 11.84%   confident-flip 0.770% (5584 conf frames)   CM [uv->uv 4203, uv->v 1031, v->uv 629, v->v 8162]
+                             per-file: {'hts1_white20': np.float64(17.17), 'hts1a_white20': np.float64(17.33), 'hts2a_white20': np.float64(16.0), 'kristoff_white20': np.float64(10.2), 'testframes_700d_white20': np.float64(17.5), 've9qrp_10s_white20': np.float64(13.8), 've9qrp_white20': np.float64(11.15)}
+  tree2                      flip 10.69%   confident-flip 0.681% (5584 conf frames)   CM [uv->uv 4428, uv->v 806, v->uv 693, v->v 8098]
+                             per-file: {'hts1_white20': np.float64(14.17), 'hts1a_white20': np.float64(17.0), 'hts2a_white20': np.float64(15.33), 'kristoff_white20': np.float64(10.2), 'testframes_700d_white20': np.float64(28.75), 've9qrp_10s_white20': np.float64(11.1), 've9qrp_white20': np.float64(10.07)}
+  ref_raw_snr_no_postproc    flip  3.69%   confident-flip 0.000% (5584 conf frames)   CM [uv->uv 5083, uv->v 151, v->uv 367, v->v 8424]
+                             per-file: {'hts1_white20': np.float64(3.0), 'hts1a_white20': np.float64(3.0), 'hts2a_white20': np.float64(5.33), 'kristoff_white20': np.float64(13.4), 'testframes_700d_white20': np.float64(11.25), 've9qrp_10s_white20': np.float64(4.0), 've9qrp_white20': np.float64(3.19)}
+
+==== failure analysis (clean, winner = tree2)
+  hts1: {'flips': 56, 'near_transition': 50, 'damaging_confident_sustained': 0, 'flip_energy_db_median': 49.0, 'flip_P_median': 97.5, 'flip_snr_margin_median': 1.75}
+  hts1a: {'flips': 28, 'near_transition': 27, 'damaging_confident_sustained': 0, 'flip_energy_db_median': 47.6, 'flip_P_median': 89.5, 'flip_snr_margin_median': 2.11}
+  hts2a: {'flips': 24, 'near_transition': 19, 'damaging_confident_sustained': 1, 'flip_energy_db_median': 52.2, 'flip_P_median': 106.5, 'flip_snr_margin_median': 2.57}
+  kristoff: {'flips': 23, 'near_transition': 13, 'damaging_confident_sustained': 0, 'flip_energy_db_median': 55.9, 'flip_P_median': 111.0, 'flip_snr_margin_median': 2.86}
+  testframes_700d: {'flips': 28, 'near_transition': 15, 'damaging_confident_sustained': 6, 'flip_energy_db_median': 72.9, 'flip_P_median': 97.0, 'flip_snr_margin_median': 5.71}
+  ve9qrp: {'flips': 1127, 'near_transition': 966, 'damaging_confident_sustained': 13, 'flip_energy_db_median': 57.3, 'flip_P_median': 90.0, 'flip_snr_margin_median': 1.95}
+  ve9qrp_10s: {'flips': 106, 'near_transition': 92, 'damaging_confident_sustained': 2, 'flip_energy_db_median': 57.1, 'flip_P_median': 94.0, 'flip_snr_margin_median': 1.61}
+
+wrote /home/user/rv003usb/.claude/worktrees/agent-a23726c493549e6a5/codec2-port/experiments/voicing/results/summary.json
