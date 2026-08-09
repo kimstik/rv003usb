@@ -155,6 +155,8 @@ def run_real(dump_path):
             frames = c2sim_parse.to_bench_frames(run)
             ref = synth_reference(frames)
             x = ENGINES[name](frames)
+            # empirically zero offset aligns best: engines ramp parameters
+            # toward the frame's values just like the OLA reference does
             lsds.append(lsd_db(x, ref, frame_n=80))
             clicks.append(click_metric(x, frames)["click_ratio"])
         rows.append({"engine": name,
@@ -313,13 +315,15 @@ def aggregate(steady_rows):
     agg = {}
     for name in MAIN_ENGINES:
         sel = [r for r in steady_rows if r["engine"] == name]
+        div = sum(1 for r in sel if not np.isfinite(r["amp_shape_mean_db"]))
         agg[name] = {
-            "amp_shape_mean_db": round(float(np.mean([r["amp_shape_mean_db"] for r in sel])), 2),
-            "amp_shape_max_db": round(float(np.max([r["amp_shape_max_db"] for r in sel])), 2),
-            "spur_db_median": round(float(np.median([r["spur_db"] for r in sel])), 1),
-            "spur_db_worst": round(float(np.max([r["spur_db"] for r in sel])), 1),
-            "nmr_db_median": round(float(np.median([r["nmr_proxy_db"] for r in sel])), 1),
-            "nmr_db_worst": round(float(np.max([r["nmr_proxy_db"] for r in sel])), 1),
+            "amp_shape_mean_db": round(float(np.nanmean([r["amp_shape_mean_db"] for r in sel])), 2),
+            "amp_shape_max_db": round(float(np.nanmax([r["amp_shape_max_db"] for r in sel])), 2),
+            "spur_db_median": round(float(np.nanmedian([r["spur_db"] for r in sel])), 1),
+            "spur_db_worst": round(float(np.nanmax([r["spur_db"] for r in sel])), 1),
+            "nmr_db_median": round(float(np.nanmedian([r["nmr_proxy_db"] for r in sel])), 1),
+            "nmr_db_worst": round(float(np.nanmax([r["nmr_proxy_db"] for r in sel])), 1),
+            "diverged_cases": div,
         }
     with open(os.path.join(RESULTS, "steady_aggregate.json"), "w") as fh:
         json.dump(agg, fh, indent=1)

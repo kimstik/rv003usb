@@ -217,6 +217,12 @@ def synth_impulse_iir(frames, order=10, csd=False, csd_terms=3, csd_form="direct
                 else:
                     exc[n] += g
         exc_pend = exc[N]
+        # zero-mean excitation: an impulse train carries a DC pedestal g/P
+        # which the all-pole filter amplifies by G/A(1) -- with a low F1 the
+        # DC gain is large and CSD perturbation of A(1) makes it explode
+        # (caught by the NMR-proxy metric, invisible to the spur metric).
+        # One extra add/sample on the MCU.
+        exc[:N] -= g * inc
         # all-pole IIR, state carried across frames
         y = np.zeros(N)
         if sections is not None:

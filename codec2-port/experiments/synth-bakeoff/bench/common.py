@@ -92,6 +92,10 @@ def make_frame(f0_hz, env_name, N=FRAME_N, amp_norm="peak1"):
     formants = ENVELOPES[env_name]
     Wo = 2 * np.pi * f0_hz / FS
     L = int(np.floor(np.pi / Wo))
+    # keep harmonics strictly below Nyquist: a component AT fs/2 is degenerate
+    # (its measured amplitude depends on phase), which poisons metrics only
+    while L * f0_hz >= FS / 2 - 1:
+        L -= 1
     k = np.arange(1, L + 1)
     A = env_mag(k * f0_hz, formants)
     if amp_norm == "peak1":

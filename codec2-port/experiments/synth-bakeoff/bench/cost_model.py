@@ -35,9 +35,10 @@ def engine_cost(name, L):
         ram = 6 * L + 16          # u16 phase, amp, damp per harmonic
         flash = 512 + 600         # sin LUT (256 x i16) + code
     elif name == "impulse-iir":
-        # excitation: 1 add + wrap check (branch); IIR order 10: 10 mul,
-        # 10 add, circular state (10 loads, 1 store); output add
-        s = {"mul": 10, "add": 13, "shift": 1, "mem": 11, "branch": 1}
+        # excitation: 1 add + wrap check (branch) + DC-removal add;
+        # IIR order 10: 10 mul, 10 add, circular state (10 loads, 1 store);
+        # output add
+        s = {"mul": 10, "add": 14, "shift": 1, "mem": 11, "branch": 1}
         # setup: LSP->LPC ~100 MAC + gain match ~40 ops (real decoder gets
         # LPC from the bitstream path anyway -- shared with any engine's
         # envelope decode; counted here to be conservative)
@@ -48,7 +49,7 @@ def engine_cost(name, L):
         # each coeff mul -> <=3 shifts + 2 adds (CSD 3 terms); SOS form has
         # the same 10 coefficient-mults, +5 adds of section plumbing
         extra = 5 if name.endswith("sos") else 0
-        s = {"mul": 0, "add": 13 + 20 + extra, "shift": 1 + 30, "mem": 11,
+        s = {"mul": 0, "add": 14 + 20 + extra, "shift": 1 + 30, "mem": 11,
              "branch": 1}
         # CSD conversion per frame: ~30 ops/coeff (or 0 if coeffs ship as CSD
         # from a baked codebook -- noted in report); gain match without mul

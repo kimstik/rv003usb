@@ -45,10 +45,13 @@ def to_bench_frames(run, N=80, norm=None):
         norm = 1.0 / max(f["A"].max() for f in run)
     out = []
     for f in run:
+        L = f["L"]
+        while L > 1 and L * f["Wo"] >= np.pi - 1e-3:   # avoid Nyquist harmonic
+            L -= 1
         out.append({
             "Wo": f["Wo"],
-            "A": f["A"] * norm,
-            "phi": np.zeros(f["L"]),
+            "A": f["A"][:L] * norm,
+            "phi": np.zeros(L),
             "N": N,
         })
     return out
