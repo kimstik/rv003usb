@@ -1,0 +1,3 @@
+# experiment working data (codec2 clone, build, dumps, noisy corpus, feature CSVs)
+work/
+__pycache__/

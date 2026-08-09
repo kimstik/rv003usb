@@ -1,0 +1,2 @@
+kNN(15) LOFO floor: overall flip 9.87%   confident-flip 0.63% (6059 conf frames)
+  per-file: {'hts1': np.float64(6.83), 'hts1a': np.float64(7.0), 'hts2a': np.float64(7.0), 'kristoff': np.float64(2.8), 'testframes_700d': np.float64(16.25), 've9qrp': np.float64(10.47), 've9qrp_10s': np.float64(9.7)}
