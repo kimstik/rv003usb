@@ -26,19 +26,20 @@ def main():
 
     print('## Per-file: swap (rule voicing) vs stock decode\n')
     print('| file | flip% | segSNR mean dB | ESTOI(vs stock) | LSD dB | '
-          'NMR dB | ESTOI(orig,stock) | dESTOI(orig) | err mass near '
-          'flips±2 | err mass near trans±2 |')
+          'NMR dB | ESTOI(orig,stock) | dESTOI(orig) | SD>3dB frames near '
+          'flips±2 | near flips|trans±2 |')
     print('|---|---|---|---|---|---|---|---|---|---|')
     for n in names:
         r = M[n]
         s = r['swap']
         a = s['attribution']
+        nf = a['sd_gt3dB_near_flips']
+        nft = a['sd_gt3dB_near_flips_or_transitions']
         print(f'| {n} | {r["flip_rate_pct"]:.2f} | '
               f'{s["segsnr_mean_dB"]:.2f} | {s["estoi_vs_stock"]:.4f} | '
               f'{s["lsd_dB"]:.2f} | {s["nmr_dB"]:.1f} | '
               f'{r["estoi_orig_stock"]:.4f} | {s["destoi_orig"]:+.4f} | '
-              f'{100 * a["err_mass_near_flips"]:.1f}% | '
-              f'{100 * a["err_mass_near_transitions"]:.1f}% |')
+              f'{100 * nf:.0f}% | {100 * nft:.0f}% |')
 
     print('\n## Per-file: random control (matched flip rate) vs stock decode')
     print('(each cell: mean over seeds ' + ','.join(seeds) + ')\n')
@@ -98,10 +99,11 @@ def main():
 
     if floor_file in M and 'stock_o2' in M[floor_file]:
         f = M[floor_file]['stock_o2']
+        nmr = 'identical (-inf)' if f['nmr_dB'] is None else f'{f["nmr_dB"]:.1f}'
         print(f'\n## Float noise floor (-O2 vs -O3 full chain, {floor_file})\n')
-        print(f'segSNR mean {f["segsnr_mean_dB"]:.2f} dB, '
+        print(f'segSNR mean {f["segsnr_mean_dB"]:.2f} dB (clamp), '
               f'ESTOI {f["estoi_vs_stock"]:.4f}, LSD {f["lsd_dB"]:.2f} dB, '
-              f'NMR {f["nmr_dB"]:.1f} dB')
+              f'NMR {nmr} dB')
 
     if W:
         print('\n## WARP-Q (raw score = DTW distance, lower = closer)\n')

@@ -52,6 +52,18 @@ def main():
         subprocess.run(['git', 'clone', '-q', '--depth', '1', REPO_URL, repo],
                        check=True)
     sys.path.insert(0, repo)
+    import numpy as np                   # noqa: E402
+    if not hasattr(np.lib, 'pad'):
+        np.lib.pad = np.pad              # pyvad 0.2.0 vs numpy>=2 shim
+    import pyvad                         # noqa: E402
+    _vad = pyvad.vad
+
+    def _vad_clipped(x, *a, **kw):
+        # librosa's 8k->16k resampling can overshoot [-1,1] by a few LSB;
+        # pyvad hard-errors on that.  Clip: identical audio, VAD unaffected.
+        return _vad(np.clip(x, -1.0, 1.0), *a, **kw)
+
+    pyvad.vad = _vad_clipped
     from warpq.core import warpqMetric   # noqa: E402
 
     metric = warpqMetric(sr=16000, native_sr=False)

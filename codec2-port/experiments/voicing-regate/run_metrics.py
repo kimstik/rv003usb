@@ -118,41 +118,88 @@ def nmr_proxy(x, ref, frame_n=256, floor_db=-40.0):
         D = X - R
         num += np.sum((W * D) ** 2)
         den += np.sum((W * R) ** 2)
-    return 10 * np.log10(num / den) if den > 0 else float('nan')
+    if den <= 0:
+        return float('nan')
+    if num <= 0:
+        return None   # bit-identical signals: -inf dB, JSON-safe marker
+    return 10 * np.log10(num / den)
 
 
 # ---- frame attribution ------------------------------------------------------
+#
+# Two views, because codec2 phases are synthetic (perceptually free by
+# design) but STATEFUL: one voicing flip permanently decorrelates the
+# decoder's phase trajectory, so the waveform error |swap-stock| stays large
+# forever after the first flip even where magnitude spectra agree.
+#   * waveform view: share of |test-stock|^2 sample energy near flips --
+#     expected to be small/uninformative (phase-divergence dominated);
+#   * magnitude view: per-frame log-spectral distortion (100-3400 Hz,
+#     Hann-160 20 ms window, 10 ms hop = decoder frame grid) between the two
+#     decodes -- phase-blind, so concentration of THIS near flips is the
+#     perceptually meaningful attribution.
+
+def _mask_near(idx, nfr, halfwidth):
+    m = np.zeros(nfr, dtype=bool)
+    for i in idx:
+        m[max(0, i - halfwidth):min(nfr, i + halfwidth + 1)] = True
+    return m
+
 
 def error_attribution(stock, test, ref_v, rule_v, n_enc, halfwidth=2):
-    """Share of |test-stock|^2 energy near rule flips / reference transitions.
-
-    Decoder output frame k covers samples [80k, 80(k+1)); interpolation in
-    decode_1300 spreads a bit's influence across its 40 ms superframe, which
-    the +-2-frame halfwidth absorbs.
-    """
     n = min(len(stock), len(test))
     err = test[:n] - stock[:n]
     nfr = n // 80
     e = np.array([np.sum(err[80 * k:80 * (k + 1)] ** 2) for k in range(nfr)])
     tot = e.sum() + 1e-30
 
-    def mask_near(idx):
-        m = np.zeros(nfr, dtype=bool)
-        for i in idx:
-            m[max(0, i - halfwidth):min(nfr, i + halfwidth + 1)] = True
-        return m
+    # first sample where the decodes diverge (samples before the first flip's
+    # superframe must be bit-identical -- decoder is deterministic)
+    div = np.nonzero(err)[0]
+    first_div_frame = int(div[0] // 80) if len(div) else None
+
+    # per-frame log-spectral distortion, 20 ms window centred on frame k
+    win = np.hanning(160)
+    f = np.fft.rfftfreq(160, 1 / FS)
+    sel = (f >= 100) & (f <= 3400)
+    rms = np.sqrt(np.mean(stock[:n] ** 2)) + 1e-12
+    gate = rms * 10 ** (-FLOOR_DB / 20)
+    d = np.full(nfr, np.nan)
+    for k in range(nfr - 1):
+        s = stock[80 * k:80 * k + 160]
+        t = test[80 * k:80 * k + 160]
+        if np.sqrt(np.mean(s ** 2)) < gate:
+            continue
+        S = np.abs(np.fft.rfft(s * win))[sel]
+        T = np.abs(np.fft.rfft(t * win))[sel]
+        ls = 20 * np.log10(np.maximum(S, 1e-9))
+        lt = 20 * np.log10(np.maximum(T, 1e-9))
+        d[k] = np.sqrt(np.mean((lt - ls) ** 2))
 
     flips = np.where(ref_v[:n_enc] != rule_v[:n_enc])[0]
     trans = np.where(np.diff(ref_v[:n_enc]) != 0)[0]
-    m_f = mask_near(flips)
-    m_t = mask_near(trans)
+    m_f = _mask_near(flips, nfr, halfwidth)
+    m_t = _mask_near(trans, nfr, halfwidth)
+    act = ~np.isnan(d)
+    big = act & (d > 3.0)
+
+    def frac(mask_sel, mask_all):
+        tot_ = mask_all.sum()
+        return float(mask_sel.sum() / tot_) if tot_ else None
+
     return {
-        'err_energy_total': float(tot),
+        'first_divergent_frame': first_div_frame,
+        'first_flip_frame': int(flips[0]) if len(flips) else None,
         'err_mass_near_flips': float(e[m_f].sum() / tot),
         'err_mass_near_transitions': float(e[m_t].sum() / tot),
-        'err_mass_near_flips_or_transitions': float(e[m_f | m_t].sum() / tot),
         'n_flips': int(len(flips)), 'n_transitions': int(len(trans)),
         'frames_near_flips': int(m_f.sum()), 'n_frames': int(nfr),
+        'sd_mean_near_flips_dB': float(np.nanmean(d[m_f & act]))
+            if (m_f & act).any() else None,
+        'sd_mean_elsewhere_dB': float(np.nanmean(d[~m_f & act]))
+            if (~m_f & act).any() else None,
+        'sd_gt3dB_frames': int(big.sum()),
+        'sd_gt3dB_near_flips': frac(big & m_f, big),
+        'sd_gt3dB_near_flips_or_transitions': frac(big & (m_f | m_t), big),
     }
 
 
@@ -200,6 +247,11 @@ def main():
             if ver == 'swap':
                 m['attribution'] = error_attribution(stock, test, ref_v,
                                                      rule_v, n_enc)
+            elif ver.startswith('rand'):
+                rv = np.loadtxt(os.path.join(dec_dir, f'{name}.{ver}.txt'),
+                                dtype=int)
+                m['attribution'] = error_attribution(stock, test, ref_v,
+                                                     rv, n_enc)
             r[ver] = m
         results[name] = r
         print(f'   {name}: swap segSNR {r["swap"]["segsnr_mean_dB"]:.1f} dB '
