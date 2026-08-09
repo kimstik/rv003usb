@@ -1,0 +1,11 @@
+engine,click_ratio,max_jump_over_rms
+reference,2.4,2.545
+osc-bank,1.98,2.24
+impulse-iir,2.11,2.503
+impulse-iir-csd,15.86,7.46
+impulse-iir-csd-sos,2.11,2.508
+meander-sq,2.66,3.141
+meander-tri,1.81,2.462
+cycle-replay,2.09,2.291
+cycle-replay-2x,2.15,2.377
+cycle-replay-nn,2.04,2.295
