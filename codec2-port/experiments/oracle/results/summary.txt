@@ -1,0 +1,11 @@
+oracle harness summary  (2026-08-09T17:51:45Z, codec2 @ 310777b)
+
+utterance     frames  voiced%   selftest   ampLPC(dB)   SD-LPC(dB)   ESTOI segSNR(dB)
+------------  ------  -------   --------   ----------   ----------  ------ ---------
+hts1a            300     81.0       PASS         3.26         4.21   0.564     -3.55
+ve9qrp_10s      1000     63.2       PASS         3.19         4.30   0.516     -3.02
+
+columns: ampLPC/SD-LPC = stage_compare of measured vs LPC+postfilter
+harmonic amplitudes (real oracle stage pair, expected O(few dB));
+ESTOI/segSNR = c2dec 1300 output vs original (parametric codec ->
+low segSNR by design; harness demo, not a port quality gate).
