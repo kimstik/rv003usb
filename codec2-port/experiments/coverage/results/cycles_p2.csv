@@ -1,0 +1,6 @@
+stage,cyc_per_sample,cyc_per_subframe,mhz_p2,source
+G8 filter + L0 scaffolding (asm),200,2950,1.91,asm-audit g8_step.s + itemized subframe path
+L2 mixed excitation (asm),96,120,0.78,asm-audit l2_biquads.s (voiced frames; s_n re-CSD)
+L4 postfilter+tilt+AGC (asm),212,11040,2.8,"asm-audit l4_step.s (DF2T + abs-AGC forms, flagged) + itemized tilt/coeff path"
+TOTAL recommended P2 decoder,508,14110,5.49,sum of audited stages
+"kl-lattice-csd3 engine (asm, for pareto row)",185,4730,1.97,asm-audit lattice_step.s + cos_lut/LSP->A/a->k(10 soft-div)/re-CSD/JIT-emit

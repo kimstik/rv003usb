@@ -1,0 +1,122 @@
+{
+ "convention": "count_asm.py prices: alu/shift 1, mem 2, taken branch 2; soft-mul ~126; F0_typ 150 Hz for the per-period fire mul",
+ "g8_engine_only_audited_mhz": 1.86,
+ "g8_engine_only_model_mhz": 1.51,
+ "g8_ratio_audit_over_model": 1.23,
+ "g8_flag_gt_1.5x": false,
+ "lattice_engine_only_audited_mhz": 1.97,
+ "lattice_engine_only_model_mhz": 2.07,
+ "lattice_ratio": 0.95,
+ "full_decoder_audited_mhz": 5.49,
+ "full_decoder_proto_estimate_mhz": 4.6,
+ "reconciliation": [
+  "pareto 1.51 MHz (lsp-allpass-csd3) is the ENGINE-ONLY ranking model: 174 cyc/smp + 1200 cyc/subframe; it never claimed to price L2/L4/param path.",
+  "proto/decoder 4.6 MHz is the FULL system estimate: 1.51 (G8) + 0.58 (L2) + 1.51 (L4) + 0.12 (L0) + ~0.9 (param).",
+  "this audit closes the loop with per-sample asm listings: G8 200 c/s, L2 96 c/s, L4 212 c/s, lattice 185 c/s; audited full stack lands within the model band once the tilt-correlation soft-muls are counted honestly (the single biggest hidden line, ~0.55 MHz).",
+  "the audit ratio for G8 engine-only sits inside the model's known 1.15-1.24x systematic (no 1.5x flag); pareto's G8 row can carry cost_source=asm-audit with the engine-only number."
+ ],
+ "prescriptions": [
+  "tilt-mu MUST move to an analytic k1 (proto gap #7): replaces ~7.75k cyc/subframe (impulse response + soft-mul correlation + division) with ~200; total drops by ~0.75 MHz.",
+  "csd3 geometric rounding needs the 2^(k0+0.5) LUT on P2 (av*av test = soft-mul per term otherwise).",
+  "AGC energy metering as sum|y| (audited form) \u2014 sum y^2 is 2 soft-muls/sample = ~2 MHz on P2, never acceptable.",
+  "L4 DF2T form must be reflected in the golden model before tier-2 bit-exactness gating (state form is part of the spec)."
+ ],
+ "param_items": [
+  {
+   "item": "lsp_interp",
+   "cycles": 90,
+   "stage": "param",
+   "note": "10 x (2 lw + w/4 weight shifts-adds + sw), c2tube_dec.c:343-345"
+  },
+  {
+   "item": "wo_e_interp_voicing",
+   "cycles": 40,
+   "stage": "param",
+   "note": "c2tube_dec.c:346-365"
+  },
+  {
+   "item": "period_softdiv",
+   "cycles": 200,
+   "stage": "param",
+   "note": "P_q7 = 10485760/wo_num: one 32/16 soft-div (redteam A2K price/div)"
+  },
+  {
+   "item": "log2_exp2_luts",
+   "cycles": 260,
+   "stage": "param",
+   "note": "log2(P) + pulse/noise scale exp2_shift x3 + AGC log2/exp2"
+  },
+  {
+   "item": "cos_lut",
+   "cycles": 200,
+   "stage": "G8",
+   "note": "10 x (2 lw + 6-bit lerp mul as shift-adds + clamps)"
+  },
+  {
+   "item": "re_csd_g8",
+   "cycles": 1200,
+   "stage": "G8",
+   "note": "RECSD_CYC (rt_cost.py) for 10 cos coeffs; REQUIRES the 2^(k0+0.5) rounding LUT \u2014 the C prototype's av*av test is a soft-mul per term on P2 (+~3.9k cyc/subframe if kept)"
+  },
+  {
+   "item": "order_fix_naf",
+   "cycles": 460,
+   "stage": "G8",
+   "note": "order_fix ~60 + NAF decomposition 10 x ~40 (c2tube_dec.c:152-188)"
+  },
+  {
+   "item": "jit_emit_g8",
+   "cycles": 500,
+   "stage": "G8",
+   "note": "JIT_EMIT_CYC (rt_cost.py), ~70 instr to SRAM"
+  },
+  {
+   "item": "poly_rebuild_a",
+   "cycles": 630,
+   "stage": "L4",
+   "note": "A(z)=(P+Q)/2 from CSD cp/cq (proto REPORT line); needed by L4 only"
+  },
+  {
+   "item": "l4_gamma_fold",
+   "cycles": 220,
+   "stage": "L4",
+   "note": "22 x (lw + baked gamma^k CSD-3 + sw), c2tube_dec.c:415-418"
+  },
+  {
+   "item": "re_csd_l4",
+   "cycles": 1200,
+   "stage": "L4",
+   "note": "re-CSD of 21 num/den coeffs (redteam price)"
+  },
+  {
+   "item": "jit_emit_l4",
+   "cycles": 1000,
+   "stage": "L4",
+   "note": "~140 instr (20 coeff blocks) to SRAM"
+  },
+  {
+   "item": "tilt_impulse_h22",
+   "cycles": 1650,
+   "stage": "L4",
+   "note": "h[0..21]: ~165 MACs via freshly JIT'd den CSD (~10 cyc each)"
+  },
+  {
+   "item": "tilt_corr_r0r1",
+   "cycles": 5500,
+   "stage": "L4",
+   "note": "r0,r1: 43 h*h products are DATA x DATA -> soft-mul each; DOMINANT param line; proto gap #7 cheap alternative (analytic k1) would replace tilt_impulse+corr+div (~7.75k) with ~200"
+  },
+  {
+   "item": "tilt_mu_div",
+   "cycles": 600,
+   "stage": "L4",
+   "note": "one (r1<<14)/r0 soft division"
+  },
+  {
+   "item": "re_csd_scales",
+   "cycles": 360,
+   "stage": "L2+L4",
+   "note": "per-subframe CSD-3 of s_n, mu, g_agc (3 x ~120)"
+  }
+ ]
+}

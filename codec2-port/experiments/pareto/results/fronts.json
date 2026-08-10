@@ -154,6 +154,7 @@
       "tube-L4-0.50",
       "tube-L4-0.65",
       "tube-L4-0.75",
+      "tube-rec-P1 (L0+L1+L2.5k+L4)",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -161,14 +162,6 @@
       "smooth-mix-1500"
      ],
      "feasible_unsized": [
-      "tube-L1",
-      "tube-L2-1500",
-      "tube-L2-2000",
-      "tube-L2-2500",
-      "tube-L3",
-      "tube-L4-0.50",
-      "tube-L4-0.65",
-      "tube-L4-0.75",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -186,7 +179,7 @@
        "ram_b": "50",
        "flash_b": "800",
        "estoi_orig": "0.556",
-       "nisqa_mos": "1.909",
+       "nisqa_mos": "1.754",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
@@ -195,23 +188,23 @@
        "lsd_db": 7.916,
        "mhz": 0.669,
        "core_pct": 2.8,
-       "ram_b": "",
-       "flash_b": "",
+       "ram_b": "302",
+       "flash_b": "990",
        "estoi_orig": "0.56",
-       "nisqa_mos": "",
+       "nisqa_mos": "1.798",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
-       "config": "tube-L4-0.50",
+       "config": "tube-rec-P1 (L0+L1+L2.5k+L4)",
        "tier": "1",
-       "lsd_db": 7.802,
-       "mhz": 1.722,
+       "lsd_db": 7.672,
+       "mhz": 1.718,
        "core_pct": 7.2,
-       "ram_b": "",
-       "flash_b": "",
-       "estoi_orig": "0.553",
-       "nisqa_mos": "",
-       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+       "ram_b": "402",
+       "flash_b": "2868",
+       "estoi_orig": "0.568",
+       "nisqa_mos": "2.312",
+       "stability": "by-construction (as tube rungs)"
       }
      ],
      "front_crest": [
@@ -237,17 +230,17 @@
        "dLSD_dB": 0.066,
        "dMHz": 0.208,
        "dB_per_MHz": 0.317,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "dFlash_B": 190.0,
+       "dB_per_KB_flash": 0.356
       },
       {
        "from": "tube-L1",
-       "to": "tube-L4-0.50",
-       "dLSD_dB": 0.114,
-       "dMHz": 1.053,
-       "dB_per_MHz": 0.108,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "to": "tube-rec-P1 (L0+L1+L2.5k+L4)",
+       "dLSD_dB": 0.244,
+       "dMHz": 1.049,
+       "dB_per_MHz": 0.233,
+       "dFlash_B": 1878.0,
+       "dB_per_KB_flash": 0.133
       }
      ]
     }
@@ -326,8 +319,8 @@
        "config": "lsp-allpass-csd3",
        "tier": "2",
        "lsd_db": 5.75,
-       "mhz": 1.51,
-       "core_pct": 3.1,
+       "mhz": 1.86,
+       "core_pct": 3.9,
        "ram_b": "90",
        "flash_b": "1000",
        "estoi_orig": "",
@@ -338,8 +331,8 @@
        "config": "kl-lattice-csd3",
        "tier": "2",
        "lsd_db": 5.69,
-       "mhz": 2.07,
-       "core_pct": 4.3,
+       "mhz": 1.97,
+       "core_pct": 4.1,
        "ram_b": "75",
        "flash_b": "1000",
        "estoi_orig": "",
@@ -365,8 +358,8 @@
        "from": "impulse-iir-csd-sos (jit)",
        "to": "lsp-allpass-csd3",
        "dLSD_dB": 0.16,
-       "dMHz": 0.54,
-       "dB_per_MHz": 0.296,
+       "dMHz": 0.89,
+       "dB_per_MHz": 0.18,
        "dFlash_B": 100.0,
        "dB_per_KB_flash": 1.638
       },
@@ -374,8 +367,8 @@
        "from": "lsp-allpass-csd3",
        "to": "kl-lattice-csd3",
        "dLSD_dB": 0.06,
-       "dMHz": 0.56,
-       "dB_per_MHz": 0.107,
+       "dMHz": 0.11,
+       "dB_per_MHz": 0.545,
        "dFlash_B": 0.0,
        "dB_per_KB_flash": null
       },
@@ -383,7 +376,7 @@
        "from": "kl-lattice-csd3",
        "to": "impulse-iir",
        "dLSD_dB": 0.02,
-       "dMHz": 8.69,
+       "dMHz": 8.79,
        "dB_per_MHz": 0.002,
        "dFlash_B": -200.0,
        "dB_per_KB_flash": -0.102
@@ -402,6 +395,7 @@
       "tube-L4-0.50",
       "tube-L4-0.65",
       "tube-L4-0.75",
+      "tube-rec-P2 (L0+L2.5k+L4)",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -409,14 +403,6 @@
       "smooth-mix-1500"
      ],
      "feasible_unsized": [
-      "tube-L1",
-      "tube-L2-1500",
-      "tube-L2-2000",
-      "tube-L2-2500",
-      "tube-L3",
-      "tube-L4-0.50",
-      "tube-L4-0.65",
-      "tube-L4-0.75",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -434,7 +420,7 @@
        "ram_b": "50",
        "flash_b": "800",
        "estoi_orig": "0.556",
-       "nisqa_mos": "1.909",
+       "nisqa_mos": "1.754",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
@@ -443,23 +429,23 @@
        "lsd_db": 7.916,
        "mhz": 1.253,
        "core_pct": 2.6,
-       "ram_b": "",
-       "flash_b": "",
+       "ram_b": "302",
+       "flash_b": "990",
        "estoi_orig": "0.56",
-       "nisqa_mos": "",
+       "nisqa_mos": "1.798",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
-       "config": "tube-L4-0.50",
+       "config": "tube-rec-P2 (L0+L2.5k+L4)",
        "tier": "1",
-       "lsd_db": 7.802,
-       "mhz": 3.348,
-       "core_pct": 7.0,
-       "ram_b": "",
-       "flash_b": "",
-       "estoi_orig": "0.553",
-       "nisqa_mos": "",
-       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+       "lsd_db": 7.71,
+       "mhz": 2.927,
+       "core_pct": 6.1,
+       "ram_b": "150",
+       "flash_b": "2678",
+       "estoi_orig": "0.563",
+       "nisqa_mos": "2.381",
+       "stability": "by-construction (as tube rungs)"
       }
      ],
      "front_crest": [
@@ -485,17 +471,17 @@
        "dLSD_dB": 0.066,
        "dMHz": 0.416,
        "dB_per_MHz": 0.159,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "dFlash_B": 190.0,
+       "dB_per_KB_flash": 0.356
       },
       {
        "from": "tube-L1",
-       "to": "tube-L4-0.50",
-       "dLSD_dB": 0.114,
-       "dMHz": 2.095,
-       "dB_per_MHz": 0.054,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "to": "tube-rec-P2 (L0+L2.5k+L4)",
+       "dLSD_dB": 0.206,
+       "dMHz": 1.674,
+       "dB_per_MHz": 0.123,
+       "dFlash_B": 1688.0,
+       "dB_per_KB_flash": 0.125
       }
      ]
     }
@@ -649,6 +635,7 @@
       "tube-L4-0.50",
       "tube-L4-0.65",
       "tube-L4-0.75",
+      "tube-rec-P1 (L0+L1+L2.5k+L4)",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -656,14 +643,6 @@
       "smooth-mix-1500"
      ],
      "feasible_unsized": [
-      "tube-L1",
-      "tube-L2-1500",
-      "tube-L2-2000",
-      "tube-L2-2500",
-      "tube-L3",
-      "tube-L4-0.50",
-      "tube-L4-0.65",
-      "tube-L4-0.75",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -681,7 +660,7 @@
        "ram_b": "50",
        "flash_b": "800",
        "estoi_orig": "0.556",
-       "nisqa_mos": "1.909",
+       "nisqa_mos": "1.754",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
@@ -690,23 +669,23 @@
        "lsd_db": 7.916,
        "mhz": 0.669,
        "core_pct": 1.4,
-       "ram_b": "",
-       "flash_b": "",
+       "ram_b": "302",
+       "flash_b": "990",
        "estoi_orig": "0.56",
-       "nisqa_mos": "",
+       "nisqa_mos": "1.798",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
-       "config": "tube-L4-0.50",
+       "config": "tube-rec-P1 (L0+L1+L2.5k+L4)",
        "tier": "1",
-       "lsd_db": 7.802,
-       "mhz": 1.722,
+       "lsd_db": 7.672,
+       "mhz": 1.718,
        "core_pct": 3.6,
-       "ram_b": "",
-       "flash_b": "",
-       "estoi_orig": "0.553",
-       "nisqa_mos": "",
-       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+       "ram_b": "402",
+       "flash_b": "2868",
+       "estoi_orig": "0.568",
+       "nisqa_mos": "2.312",
+       "stability": "by-construction (as tube rungs)"
       }
      ],
      "front_crest": [
@@ -732,17 +711,17 @@
        "dLSD_dB": 0.066,
        "dMHz": 0.208,
        "dB_per_MHz": 0.317,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "dFlash_B": 190.0,
+       "dB_per_KB_flash": 0.356
       },
       {
        "from": "tube-L1",
-       "to": "tube-L4-0.50",
-       "dLSD_dB": 0.114,
-       "dMHz": 1.053,
-       "dB_per_MHz": 0.108,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "to": "tube-rec-P1 (L0+L1+L2.5k+L4)",
+       "dLSD_dB": 0.244,
+       "dMHz": 1.049,
+       "dB_per_MHz": 0.233,
+       "dFlash_B": 1878.0,
+       "dB_per_KB_flash": 0.133
       }
      ]
     }
@@ -896,6 +875,7 @@
       "tube-L4-0.50",
       "tube-L4-0.65",
       "tube-L4-0.75",
+      "tube-rec-P1 (L0+L1+L2.5k+L4)",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -903,14 +883,6 @@
       "smooth-mix-1500"
      ],
      "feasible_unsized": [
-      "tube-L1",
-      "tube-L2-1500",
-      "tube-L2-2000",
-      "tube-L2-2500",
-      "tube-L3",
-      "tube-L4-0.50",
-      "tube-L4-0.65",
-      "tube-L4-0.75",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -928,7 +900,7 @@
        "ram_b": "50",
        "flash_b": "800",
        "estoi_orig": "0.556",
-       "nisqa_mos": "1.909",
+       "nisqa_mos": "1.754",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
@@ -937,23 +909,23 @@
        "lsd_db": 7.916,
        "mhz": 0.669,
        "core_pct": 0.7,
-       "ram_b": "",
-       "flash_b": "",
+       "ram_b": "302",
+       "flash_b": "990",
        "estoi_orig": "0.56",
-       "nisqa_mos": "",
+       "nisqa_mos": "1.798",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
-       "config": "tube-L4-0.50",
+       "config": "tube-rec-P1 (L0+L1+L2.5k+L4)",
        "tier": "1",
-       "lsd_db": 7.802,
-       "mhz": 1.722,
+       "lsd_db": 7.672,
+       "mhz": 1.718,
        "core_pct": 1.7,
-       "ram_b": "",
-       "flash_b": "",
-       "estoi_orig": "0.553",
-       "nisqa_mos": "",
-       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+       "ram_b": "402",
+       "flash_b": "2868",
+       "estoi_orig": "0.568",
+       "nisqa_mos": "2.312",
+       "stability": "by-construction (as tube rungs)"
       }
      ],
      "front_crest": [
@@ -979,17 +951,17 @@
        "dLSD_dB": 0.066,
        "dMHz": 0.208,
        "dB_per_MHz": 0.317,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "dFlash_B": 190.0,
+       "dB_per_KB_flash": 0.356
       },
       {
        "from": "tube-L1",
-       "to": "tube-L4-0.50",
-       "dLSD_dB": 0.114,
-       "dMHz": 1.053,
-       "dB_per_MHz": 0.108,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "to": "tube-rec-P1 (L0+L1+L2.5k+L4)",
+       "dLSD_dB": 0.244,
+       "dMHz": 1.049,
+       "dB_per_MHz": 0.233,
+       "dFlash_B": 1878.0,
+       "dB_per_KB_flash": 0.133
       }
      ]
     }
@@ -1143,6 +1115,7 @@
       "tube-L4-0.50",
       "tube-L4-0.65",
       "tube-L4-0.75",
+      "tube-rec-P1 (L0+L1+L2.5k+L4)",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -1150,14 +1123,6 @@
       "smooth-mix-1500"
      ],
      "feasible_unsized": [
-      "tube-L1",
-      "tube-L2-1500",
-      "tube-L2-2000",
-      "tube-L2-2500",
-      "tube-L3",
-      "tube-L4-0.50",
-      "tube-L4-0.65",
-      "tube-L4-0.75",
       "par-plain",
       "par-noise-2000",
       "par-noise-1000",
@@ -1175,7 +1140,7 @@
        "ram_b": "50",
        "flash_b": "800",
        "estoi_orig": "0.556",
-       "nisqa_mos": "1.909",
+       "nisqa_mos": "1.754",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
@@ -1184,23 +1149,23 @@
        "lsd_db": 7.916,
        "mhz": 0.669,
        "core_pct": 0.5,
-       "ram_b": "",
-       "flash_b": "",
+       "ram_b": "302",
+       "flash_b": "990",
        "estoi_orig": "0.56",
-       "nisqa_mos": "",
+       "nisqa_mos": "1.798",
        "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
       },
       {
-       "config": "tube-L4-0.50",
+       "config": "tube-rec-P1 (L0+L1+L2.5k+L4)",
        "tier": "1",
-       "lsd_db": 7.802,
-       "mhz": 1.722,
+       "lsd_db": 7.672,
+       "mhz": 1.718,
        "core_pct": 1.2,
-       "ram_b": "",
-       "flash_b": "",
-       "estoi_orig": "0.553",
-       "nisqa_mos": "",
-       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+       "ram_b": "402",
+       "flash_b": "2868",
+       "estoi_orig": "0.568",
+       "nisqa_mos": "2.312",
+       "stability": "by-construction (as tube rungs)"
       }
      ],
      "front_crest": [
@@ -1226,17 +1191,17 @@
        "dLSD_dB": 0.066,
        "dMHz": 0.208,
        "dB_per_MHz": 0.317,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "dFlash_B": 190.0,
+       "dB_per_KB_flash": 0.356
       },
       {
        "from": "tube-L1",
-       "to": "tube-L4-0.50",
-       "dLSD_dB": 0.114,
-       "dMHz": 1.053,
-       "dB_per_MHz": 0.108,
-       "dFlash_B": null,
-       "dB_per_KB_flash": null
+       "to": "tube-rec-P1 (L0+L1+L2.5k+L4)",
+       "dLSD_dB": 0.244,
+       "dMHz": 1.049,
+       "dB_per_MHz": 0.233,
+       "dFlash_B": 1878.0,
+       "dB_per_KB_flash": 0.133
       }
      ]
     }
@@ -1252,36 +1217,36 @@
    "CH32V203": "0.3%"
   },
   "tube-L1": {
-   "PY32F003x8": "2.8% ?",
-   "CH32V003": "2.6% ?",
-   "CH32V006": "1.4% ?",
-   "CH570": "0.7% ?",
-   "CH32V203": "0.5% ?"
+   "PY32F003x8": "2.8%",
+   "CH32V003": "2.6%",
+   "CH32V006": "1.4%",
+   "CH570": "0.7%",
+   "CH32V203": "0.5%"
   },
   "tube-L2-2500": {
-   "PY32F003x8": "4.0% ?",
-   "CH32V003": "3.8% ?",
-   "CH32V006": "2.0% ?",
-   "CH570": "1.0% ?",
-   "CH32V203": "0.7% ?"
+   "PY32F003x8": "4.0%",
+   "CH32V003": "3.8%",
+   "CH32V006": "2.0%",
+   "CH570": "1.0%",
+   "CH32V203": "0.7%"
   },
   "tube-L4-0.50": {
-   "PY32F003x8": "7.2% ?",
-   "CH32V003": "7.0% ?",
-   "CH32V006": "3.6% ?",
-   "CH570": "1.7% ?",
-   "CH32V203": "1.2% ?"
+   "PY32F003x8": "7.2%",
+   "CH32V003": "7.0%",
+   "CH32V006": "3.6%",
+   "CH570": "1.7%",
+   "CH32V203": "1.2%"
   },
   "tube-rec-P1 (L0+L1+L2.5k+L4)": {
-   "PY32F003x8": "7.2% ?",
+   "PY32F003x8": "7.2%",
    "CH32V003": "\u2014",
-   "CH32V006": "3.6% ?",
-   "CH570": "1.7% ?",
-   "CH32V203": "1.2% ?"
+   "CH32V006": "3.6%",
+   "CH570": "1.7%",
+   "CH32V203": "1.2%"
   },
   "tube-rec-P2 (L0+L2.5k+L4)": {
    "PY32F003x8": "\u2014",
-   "CH32V003": "6.1% ?",
+   "CH32V003": "6.1%",
    "CH32V006": "\u2014",
    "CH570": "\u2014",
    "CH32V203": "\u2014"
@@ -1309,14 +1274,14 @@
   },
   "lsp-allpass-csd3": {
    "PY32F003x8": "6.3%",
-   "CH32V003": "3.1%",
+   "CH32V003": "3.9%",
    "CH32V006": "3.1%",
    "CH570": "1.5%",
    "CH32V203": "1.0%"
   },
   "kl-lattice-csd3": {
    "PY32F003x8": "8.6%",
-   "CH32V003": "4.3%",
+   "CH32V003": "4.1%",
    "CH32V006": "4.3%",
    "CH570": "2.1%",
    "CH32V203": "1.4%"

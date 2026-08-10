@@ -1,0 +1,44 @@
+{
+ "field_sizes": {
+  "prev_lsp_q2": 20,
+  "prev_wo_num_q2": 2,
+  "prev_lg2e_q8": 2,
+  "prev_voiced": 1,
+  "tau_q7": 2,
+  "lfsr": 2,
+  "exc_tail": 16,
+  "s1p": 20,
+  "s2p": 20,
+  "s1q": 20,
+  "s2q": 20,
+  "sp_last": 4,
+  "sq_last": 4,
+  "zlp": 8,
+  "zhp": 8,
+  "ynum_hist": 40,
+  "yden_hist": 40,
+  "tilt_state": 4
+ },
+ "table_sizes": {
+  "LSP_BITS_TAB": 10,
+  "LSP_CB_FLAT": 264,
+  "LSP_CB_OFF": 10,
+  "LG2E_Q8": 64,
+  "COS_Q14": 502,
+  "EXP2_Q14": 66,
+  "LOG2_Q8": 66,
+  "B_LP_Q14": 6,
+  "A_LP_Q14": 6,
+  "B_HP_Q14": 6,
+  "A_HP_Q14": 6,
+  "G1POW_Q14": 22,
+  "G2POW_Q14": 22
+ },
+ "rv32ec_text_bytes": {
+  "full": 6706,
+  "nol2": 6152,
+  "nol4": 5450
+ },
+ "code_delta_l2": 554,
+ "code_delta_l4": 1256
+}

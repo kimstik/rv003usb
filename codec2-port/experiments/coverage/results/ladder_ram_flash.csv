@@ -1,0 +1,6 @@
+stage,state_ram_b,table_flash_b,code_flash_b,source
+L0+G8 engine+param path (all-but-L2/L4),133,982,4896,measured (census + rv32ec -Os stripped variants)
++L1 dispersion (NOT in proto; tube.py model),252,130,60,estimate: exc tail 4->67 int32 words; 65-tap int16 Q14 FIR; ~30-instr stamp loop (proto gap #1)
++L2 mixed excitation,16,24,554,measured
++L4 postfilter+tilt+AGC,84,44,1256,measured
+TOTAL full decoder (struct sizeof cross-check),236,1050,6706,struct=236 B; rv32ec .o text+rodata=6706 B (budget.txt: 236 B / 6706 B)
