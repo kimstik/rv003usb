@@ -25,15 +25,15 @@ Price of choice (adjacent front points):
 | config | tier | LSD dB | MHz | % core | RAM B | flash B | stability |
 |---|---|---|---|---|---|---|---|
 | tube-L0 | 2 | 7.982 | 0.461 | 1.9% | 50 | 800 | by-construction |
-| tube-L1 | 2 | 7.916 | 0.669 | 2.8% | ? | ? | by-construction |
-| tube-L4-0.50 | 1 | 7.802 | 1.722 | 7.2% | ? | ? | by-construction |
+| tube-L1 | 2 | 7.916 | 0.669 | 2.8% | 302 | 990 | by-construction |
+| tube-rec-P1 (L0+L1+L2.5k+L4) | 1 | 7.672 | 1.718 | 7.2% | 402 | 2868 | by-construction |
 
 Price of choice (adjacent front points):
 
 | step | ΔLSD dB | ΔMHz | dB/MHz | Δflash B | dB/KB |
 |---|---|---|---|---|---|
-| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | — | — |
-| tube-L1 → tube-L4-0.50 | +0.11 | +1.05 | 0.108 | — | — |
+| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | 190 | 0.356 |
+| tube-L1 → tube-rec-P1 (L0+L1+L2.5k+L4) | +0.24 | +1.05 | 0.233 | 1878 | 0.133 |
 
 Secondary system front on |crest Δ| (temporal texture / anti-buzz — the axis where L2 pays and which LSD hides):
 
@@ -49,17 +49,17 @@ Secondary system front on |crest Δ| (temporal texture / anti-buzz — the axis 
 | config | tier | LSD dB | MHz | % core | RAM B | flash B | stability |
 |---|---|---|---|---|---|---|---|
 | impulse-iir-csd-sos (jit) | 2 | 5.91 | 0.97 | 2.0% | 361 | 900 | by-testing |
-| lsp-allpass-csd3 | 2 | 5.75 | 1.51 | 3.1% | 90 | 1000 | by-construction |
-| kl-lattice-csd3 | 2 | 5.69 | 2.07 | 4.3% | 75 | 1000 | by-construction |
+| lsp-allpass-csd3 | 2 | 5.75 | 1.86 | 3.9% | 90 | 1000 | by-construction |
+| kl-lattice-csd3 | 2 | 5.69 | 1.97 | 4.1% | 75 | 1000 | by-construction |
 | impulse-iir | 2 | 5.67 | 10.76 | 22.4% | 50 | 800 | by-construction |
 
 Price of choice (adjacent front points):
 
 | step | ΔLSD dB | ΔMHz | dB/MHz | Δflash B | dB/KB |
 |---|---|---|---|---|---|
-| impulse-iir-csd-sos (jit) → lsp-allpass-csd3 | +0.16 | +0.54 | 0.296 | 100 | 1.638 |
-| lsp-allpass-csd3 → kl-lattice-csd3 | +0.06 | +0.56 | 0.107 | 0 | — |
-| kl-lattice-csd3 → impulse-iir | +0.02 | +8.69 | 0.002 | -200 | -0.102 |
+| impulse-iir-csd-sos (jit) → lsp-allpass-csd3 | +0.16 | +0.89 | 0.18 | 100 | 1.638 |
+| lsp-allpass-csd3 → kl-lattice-csd3 | +0.06 | +0.11 | 0.545 | 0 | — |
+| kl-lattice-csd3 → impulse-iir | +0.02 | +8.79 | 0.002 | -200 | -0.102 |
 
 Infeasible: **osc-bank L=40** (40.65 MHz > 50% of 48 MHz); **osc-bank L=80** (93.58 MHz > 50% of 48 MHz); **meander-mip-nn L=40** (41.00 MHz > 50% of 48 MHz); **meander-mip-nn L=80** (82.01 MHz > 50% of 48 MHz); **meander-mip-lin L=20** (40.34 MHz > 50% of 48 MHz); **meander-mip-lin L=40** (80.68 MHz > 50% of 48 MHz); **meander-mip-lin L=80** (161.37 MHz > 50% of 48 MHz); **meander-blep L=40** (42.66 MHz > 50% of 48 MHz); **meander-blep L=80** (84.35 MHz > 50% of 48 MHz); **cycle-replay L=80** (81.42 MHz > 50% of 48 MHz); **cycle-replay-2x L=40** (41.42 MHz > 50% of 48 MHz); **cycle-replay-2x L=80** (161.42 MHz > 50% of 48 MHz); **cycle-replay-nn L=80** (80.43 MHz > 50% of 48 MHz); **cr-rt-lin L=40** (59.39 MHz > 50% of 48 MHz); **cr-rt-lin L=80** (234.50 MHz > 50% of 48 MHz); **cr-rt-lin-sym L=40** (30.21 MHz > 50% of 48 MHz); **cr-rt-lin-sym L=80** (117.76 MHz > 50% of 48 MHz)
 
@@ -69,15 +69,15 @@ Infeasible: **osc-bank L=40** (40.65 MHz > 50% of 48 MHz); **osc-bank L=80** (93
 | config | tier | LSD dB | MHz | % core | RAM B | flash B | stability |
 |---|---|---|---|---|---|---|---|
 | tube-L0 | 2 | 7.982 | 0.837 | 1.7% | 50 | 800 | by-construction |
-| tube-L1 | 2 | 7.916 | 1.253 | 2.6% | ? | ? | by-construction |
-| tube-L4-0.50 | 1 | 7.802 | 3.348 | 7.0% | ? | ? | by-construction |
+| tube-L1 | 2 | 7.916 | 1.253 | 2.6% | 302 | 990 | by-construction |
+| tube-rec-P2 (L0+L2.5k+L4) | 1 | 7.71 | 2.927 | 6.1% | 150 | 2678 | by-construction |
 
 Price of choice (adjacent front points):
 
 | step | ΔLSD dB | ΔMHz | dB/MHz | Δflash B | dB/KB |
 |---|---|---|---|---|---|
-| tube-L0 → tube-L1 | +0.07 | +0.42 | 0.159 | — | — |
-| tube-L1 → tube-L4-0.50 | +0.11 | +2.10 | 0.054 | — | — |
+| tube-L0 → tube-L1 | +0.07 | +0.42 | 0.159 | 190 | 0.356 |
+| tube-L1 → tube-rec-P2 (L0+L2.5k+L4) | +0.21 | +1.67 | 0.123 | 1688 | 0.125 |
 
 Secondary system front on |crest Δ| (temporal texture / anti-buzz — the axis where L2 pays and which LSD hides):
 
@@ -111,15 +111,15 @@ Price of choice (adjacent front points):
 | config | tier | LSD dB | MHz | % core | RAM B | flash B | stability |
 |---|---|---|---|---|---|---|---|
 | tube-L0 | 2 | 7.982 | 0.461 | 1.0% | 50 | 800 | by-construction |
-| tube-L1 | 2 | 7.916 | 0.669 | 1.4% | ? | ? | by-construction |
-| tube-L4-0.50 | 1 | 7.802 | 1.722 | 3.6% | ? | ? | by-construction |
+| tube-L1 | 2 | 7.916 | 0.669 | 1.4% | 302 | 990 | by-construction |
+| tube-rec-P1 (L0+L1+L2.5k+L4) | 1 | 7.672 | 1.718 | 3.6% | 402 | 2868 | by-construction |
 
 Price of choice (adjacent front points):
 
 | step | ΔLSD dB | ΔMHz | dB/MHz | Δflash B | dB/KB |
 |---|---|---|---|---|---|
-| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | — | — |
-| tube-L1 → tube-L4-0.50 | +0.11 | +1.05 | 0.108 | — | — |
+| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | 190 | 0.356 |
+| tube-L1 → tube-rec-P1 (L0+L1+L2.5k+L4) | +0.24 | +1.05 | 0.233 | 1878 | 0.133 |
 
 Secondary system front on |crest Δ| (temporal texture / anti-buzz — the axis where L2 pays and which LSD hides):
 
@@ -153,15 +153,15 @@ Price of choice (adjacent front points):
 | config | tier | LSD dB | MHz | % core | RAM B | flash B | stability |
 |---|---|---|---|---|---|---|---|
 | tube-L0 | 2 | 7.982 | 0.461 | 0.5% | 50 | 800 | by-construction |
-| tube-L1 | 2 | 7.916 | 0.669 | 0.7% | ? | ? | by-construction |
-| tube-L4-0.50 | 1 | 7.802 | 1.722 | 1.7% | ? | ? | by-construction |
+| tube-L1 | 2 | 7.916 | 0.669 | 0.7% | 302 | 990 | by-construction |
+| tube-rec-P1 (L0+L1+L2.5k+L4) | 1 | 7.672 | 1.718 | 1.7% | 402 | 2868 | by-construction |
 
 Price of choice (adjacent front points):
 
 | step | ΔLSD dB | ΔMHz | dB/MHz | Δflash B | dB/KB |
 |---|---|---|---|---|---|
-| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | — | — |
-| tube-L1 → tube-L4-0.50 | +0.11 | +1.05 | 0.108 | — | — |
+| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | 190 | 0.356 |
+| tube-L1 → tube-rec-P1 (L0+L1+L2.5k+L4) | +0.24 | +1.05 | 0.233 | 1878 | 0.133 |
 
 Secondary system front on |crest Δ| (temporal texture / anti-buzz — the axis where L2 pays and which LSD hides):
 
@@ -195,15 +195,15 @@ Price of choice (adjacent front points):
 | config | tier | LSD dB | MHz | % core | RAM B | flash B | stability |
 |---|---|---|---|---|---|---|---|
 | tube-L0 | 2 | 7.982 | 0.461 | 0.3% | 50 | 800 | by-construction |
-| tube-L1 | 2 | 7.916 | 0.669 | 0.5% | ? | ? | by-construction |
-| tube-L4-0.50 | 1 | 7.802 | 1.722 | 1.2% | ? | ? | by-construction |
+| tube-L1 | 2 | 7.916 | 0.669 | 0.5% | 302 | 990 | by-construction |
+| tube-rec-P1 (L0+L1+L2.5k+L4) | 1 | 7.672 | 1.718 | 1.2% | 402 | 2868 | by-construction |
 
 Price of choice (adjacent front points):
 
 | step | ΔLSD dB | ΔMHz | dB/MHz | Δflash B | dB/KB |
 |---|---|---|---|---|---|
-| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | — | — |
-| tube-L1 → tube-L4-0.50 | +0.11 | +1.05 | 0.108 | — | — |
+| tube-L0 → tube-L1 | +0.07 | +0.21 | 0.317 | 190 | 0.356 |
+| tube-L1 → tube-rec-P1 (L0+L1+L2.5k+L4) | +0.24 | +1.05 | 0.233 | 1878 | 0.133 |
 
 Secondary system front on |crest Δ| (temporal texture / anti-buzz — the axis where L2 pays and which LSD hides):
 
@@ -219,16 +219,16 @@ Cell: `core-%` if it fits (MHz ≤ 50% clock, RAM/flash + reserve fit); `?` = fi
 | config | PY32F003x8 | CH32V003 | CH32V006 | CH570 | CH32V203 |
 |---|---|---|---|---|---|
 | tube-L0 | 1.9% | 1.7% | 1.0% | 0.5% | 0.3% |
-| tube-L1 | 2.8% ? | 2.6% ? | 1.4% ? | 0.7% ? | 0.5% ? |
-| tube-L2-2500 | 4.0% ? | 3.8% ? | 2.0% ? | 1.0% ? | 0.7% ? |
-| tube-L4-0.50 | 7.2% ? | 7.0% ? | 3.6% ? | 1.7% ? | 1.2% ? |
-| tube-rec-P1 (L0+L1+L2.5k+L4) | 7.2% ? | — | 3.6% ? | 1.7% ? | 1.2% ? |
-| tube-rec-P2 (L0+L2.5k+L4) | — | 6.1% ? | — | — | — |
+| tube-L1 | 2.8% | 2.6% | 1.4% | 0.7% | 0.5% |
+| tube-L2-2500 | 4.0% | 3.8% | 2.0% | 1.0% | 0.7% |
+| tube-L4-0.50 | 7.2% | 7.0% | 3.6% | 1.7% | 1.2% |
+| tube-rec-P1 (L0+L1+L2.5k+L4) | 7.2% | — | 3.6% | 1.7% | 1.2% |
+| tube-rec-P2 (L0+L2.5k+L4) | — | 6.1% | — | — | — |
 | impulse-iir | 1.7% | 22.4% | 0.9% | 0.4% | 0.3% |
 | impulse-iir-csd-sos (jit) | 3.2% | 2.0% | 1.6% | 0.8% | 0.5% |
 | impulse-iir-csd-sos (interp) | 3.2% | 5.5% | 1.6% | 0.8% | 0.5% |
-| lsp-allpass-csd3 | 6.3% | 3.1% | 3.1% | 1.5% | 1.0% |
-| kl-lattice-csd3 | 8.6% | 4.3% | 4.3% | 2.1% | 1.4% |
+| lsp-allpass-csd3 | 6.3% | 3.9% | 3.1% | 1.5% | 1.0% |
+| kl-lattice-csd3 | 8.6% | 4.1% | 4.3% | 2.1% | 1.4% |
 | osc-bank L=80 | 21.4% | ✗ (93.58 MHz > 50% of 48 MHz) | 10.7% | 5.1% | 3.6% |
 | cycle-replay-2x L=80 | 32.3% | ✗ (161.42 MHz > 50% of 48 MHz) | 16.2% | 7.8% | 5.4% |
 | cr-rt-lin L=80 | 47.0% | ✗ (234.50 MHz > 50% of 48 MHz) | 23.5% | 11.3% | 7.8% |

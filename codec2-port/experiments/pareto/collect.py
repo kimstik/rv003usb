@@ -14,6 +14,9 @@ Sources (all under codec2-port/experiments/):
   tube-ladder/results/{metrics.csv, cost_ladder.csv, warpq.json}
   metrics-adequacy/results/{classic.csv, neural.csv, warpq.json}
   error-injector/results/budgets.yaml   (constraints; cited in REPORT, not rows)
+  coverage/results/{neural_ladder.csv, knees_metrics.csv,
+                    real_engines_3utt.csv, ladder_ram_flash.csv,
+                    cycles_p2.json}     (round-4 gap closure)
 
 Column semantics / jurisdictions (per each experiment's REPORT.md):
   * env/spur/nmr        — synthetic steady grid vs sum-of-sinusoids reference
@@ -71,7 +74,7 @@ COLUMNS = [
     "config", "family", "tier", "L", "stability",
     # quality — engine jurisdiction (synthetic grid + real hts1a vs sinusoid ref)
     "env_mean_db", "env_max_db", "spur_worst_db", "nmr_worst_db",
-    "lsd_engine_db", "click_ratio",
+    "lsd_engine_db", "lsd_engine_3utt_db", "click_ratio",
     # quality — system jurisdiction (q1300 decode vs codec2 phase0 ref, 3 utts)
     "lsd_sys_db", "estoi_orig", "crest_delta_db",
     "warpq_ref", "warpq_orig", "warpq_valid",
@@ -109,7 +112,52 @@ adeq_classic = read_csv(EXP / "metrics-adequacy/results/classic.csv")
 adeq_neural = read_csv(EXP / "metrics-adequacy/results/neural.csv")
 adeq_warpq = read_json(EXP / "metrics-adequacy/results/warpq.json")
 
+# round-4 coverage results (gap closure; optional so pre-round-4 trees replay)
+COV = EXP / "coverage/results"
+cov_neural = read_csv(COV / "neural_ladder.csv") if (COV / "neural_ladder.csv").exists() else []
+cov_knees = read_csv(COV / "knees_metrics.csv") if (COV / "knees_metrics.csv").exists() else []
+cov_real3 = read_csv(COV / "real_engines_3utt.csv") if (COV / "real_engines_3utt.csv").exists() else []
+cov_sizes = read_csv(COV / "ladder_ram_flash.csv") if (COV / "ladder_ram_flash.csv").exists() else []
+cov_cycles = read_json(COV / "cycles_p2.json") if (COV / "cycles_p2.json").exists() else {}
+
+cov_real_mean = {r["engine"]: r for r in cov_real3 if r["utt"] == "MEAN-3UTT"}
+
 UTTS = ["hts1a", "hts2a", "ve9qrp_10s"]
+
+
+def cov_neural_avg(variant):
+    """mean NISQA-MOS / DNSMOS-OVRL over 3 utts from the round-4 direct
+    measurement of the ladder wavs (coverage/run_neural_ladder.py)."""
+    rs = [r for r in cov_neural if r["variant"] == variant]
+    if not rs:
+        return None, None
+    return (mean([float(r["nisqa_mos"]) for r in rs]),
+            mean([float(r["dns_ovrl"]) for r in rs]))
+
+
+def cov_knee_agg(variant):
+    rs = [r for r in cov_knees if r["variant"] == variant]
+    if not rs:
+        return None
+    return {
+        "lsd_sys_db": mean([float(r["lsd_mean"]) for r in rs]),
+        "estoi_orig": mean([float(r["estoi_orig"]) for r in rs]),
+        "crest_delta_db": mean([float(r["crest_delta_median"]) for r in rs]),
+    }
+
+
+def _cov_size(prefix):
+    for r in cov_sizes:
+        if r["stage"].startswith(prefix):
+            return (int(r["state_ram_b"]),
+                    int(r["table_flash_b"]) + int(r["code_flash_b"]))
+    return (0, 0)
+
+
+# per-stage RAM/flash increments (state; tables+code), measured round-4
+# census of proto/decoder (L1 = documented estimate, no C twin)
+SIZE_INC = {"L1w": _cov_size("+L1"), "L2": _cov_size("+L2"),
+            "L3": (0, 0), "L4": _cov_size("+L4")}
 
 
 def steady(name):
@@ -231,14 +279,27 @@ W2 = {
     "ks-period-iir": ("", "by-construction (float)",
                       "KILLED: = impulse-iir computed per period, no win anywhere"),
 }
+# round-4 asm audit replaced the model P2 numbers for G8 and the lattice
+# (coverage/cycles_p2.json; engine-only jurisdiction, same as the model rows)
+AUDIT_P2 = {}
+if cov_cycles:
+    AUDIT_P2 = {
+        "lsp-allpass-csd3": cov_cycles["g8_engine_only_audited_mhz"],
+        "kl-lattice-csd3": cov_cycles["lattice_engine_only_audited_mhz"],
+    }
 for name, (tier, stab, note) in W2.items():
     cr = cost_row(rt_cost, name if name != "ks-period-iir" else "kl-lattice-csd3", "any")
     if name == "ks-period-iir":
         cr = None  # no cost row committed for it
+    p2 = float(cr["MHz@nomul"]) if cr else None
+    src = "model" if cr else ""
+    if name in AUDIT_P2:
+        p2, src = AUDIT_P2[name], "asm-audit"
+        note += ("; P2 asm-audited round-4 (coverage): model was "
+                 f"{float(cr['MHz@nomul']):.2f}")
     add(name, "engine", tier, "any", stab,
-        float(cr["MHz@mul"]) if cr else None,
-        float(cr["MHz@nomul"]) if cr else None,
-        "model" if cr else "", cr["RAM_B"] if cr else None,
+        float(cr["MHz@mul"]) if cr else None, p2,
+        src, cr["RAM_B"] if cr else None,
         cr["flash_B"] if cr else None, STREAM, note,
         q=steady(name), real=rt_real.get(name))
 
@@ -314,6 +375,23 @@ for var in ("cr-rt-lin", "cr-rt-lin-sym"):
             q=steady("cr-rt-full"), real=rt_real.get("cr-rt-full"))
 
 
+# round-4: 3-utterance real-speech LSD for the engines that sit on the P2
+# engine front (coverage/run_real_engines.py; hts1a column reproduced the
+# committed red-team numbers exactly before extension)
+_COV3_MAP = [("osc-bank", "osc-bank"),
+             ("impulse-iir-csd-sos", "impulse-iir-csd-sos"),
+             ("impulse-iir-csd-direct", None),
+             ("impulse-iir", "impulse-iir"),
+             ("lsp-allpass-csd3", "lsp-allpass-csd3"),
+             ("kl-lattice-csd3", "kl-lattice-csd3")]
+for r in rows:
+    for prefix, eng in _COV3_MAP:
+        if r["config"].startswith(prefix):
+            if eng and eng in cov_real_mean:
+                r["lsd_engine_3utt_db"] = cov_real_mean[eng]["lsd_db_mean"]
+            break
+
+
 # ------------------------------------------------------- system rungs (tube)
 def tube_agg(variant, cond="q1300"):
     """aggregate metrics.csv over the 3 utterances for one rung, q1300."""
@@ -387,13 +465,21 @@ for rung, tier, stages, wqv in LADDER:
     wq_r, wq_o = tube_wq(rung)
     sysq = tube_agg(rung)
     sysq.update(warpq_ref=wq_r, warpq_orig=wq_o, warpq_valid=wqv)
-    nis, dns = (None, None)
-    if rung == "L0":
-        nis, dns = neural_avg("buzz-l0")  # metrics-adequacy buzz-l0 == bare tube L0
+    # round-4: every rung wav judged directly (coverage/run_neural_ladder.py);
+    # falls back to metrics-adequacy buzz-l0 (== bare tube L0) if absent
+    nis, dns = cov_neural_avg(rung)
+    if nis is None and rung == "L0":
+        nis, dns = neural_avg("buzz-l0")
     if nis:
         sysq.update(nisqa_mos=nis, dns_ovrl=dns)
-    ram = 50 if rung == "L0" else None      # engine state only; ladder RAM unmeasured
-    flash = 800 if rung == "L0" else None
+    # engine state/tables base (bake-off convention) + measured round-4 stage
+    # increments (proto/decoder census; L3 adds no state)
+    if cov_sizes:
+        ram = 50 + sum(SIZE_INC.get(s, (0, 0))[0] for s in stages if s != "L0")
+        flash = 800 + sum(SIZE_INC.get(s, (0, 0))[1] for s in stages if s != "L0")
+    else:
+        ram = 50 if rung == "L0" else None
+        flash = 800 if rung == "L0" else None
     add(f"tube-{rung}", "system-rung", tier, "any",
         "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per "
         "budgets.yaml)",
@@ -406,19 +492,51 @@ for rung, tier, stages, wqv in LADDER:
            "jurisdiction), raw value kept for transparency" if wqv == "no" else ""),
         sysq=sysq)
 
-# recommended subsets (derived costs; quality NOT separately measured = gap)
+# recommended subsets: costs are derived sums; quality was measured directly
+# in round 4 (coverage/run_knees.py + run_neural_ladder.py: the EXACT
+# combinations P1 = L0+L1+L2-2500+L4(0.50), P2 = L0+L2-2500+L4(0.50))
 p1r = sum(float(tube_cost[CK[s]]["MHz_P1_mul"]) for s in ["L0", "L1w", "L2", "L4"])
 p2r = sum(float(tube_cost[CK[s]]["MHz_P2_csd"]) for s in ["L0", "L2", "L4"])
+
+
+def knee_sysq(variant):
+    sysq = cov_knee_agg(variant)
+    if sysq is None:
+        return None
+    nis, dns = cov_neural_avg(variant)
+    if nis:
+        sysq.update(nisqa_mos=nis, dns_ovrl=dns)
+    return sysq
+
+
+def knee_size(stages):
+    if not cov_sizes:
+        return None, None
+    ram = 50 + sum(SIZE_INC.get(s, (0, 0))[0] for s in stages)
+    flash = 800 + sum(SIZE_INC.get(s, (0, 0))[1] for s in stages)
+    return ram, flash
+
+
+ram1, flash1 = knee_size(["L1w", "L2", "L4"])
+q1 = knee_sysq("P1-knee")
 add("tube-rec-P1 (L0+L1+L2.5k+L4)", "system-rec", 1, "any",
     "by-construction (as tube rungs)", p1r, None,
-    "model (derived sum)", None, None, "as tube-L4",
-    "tube-ladder P1 recommendation; quality of exact subset (no L3) not "
-    "separately measured — see coverage matrix (round-4)")
+    "model (derived sum)", ram1, flash1, "as tube-L4",
+    "tube-ladder P1 recommendation; exact subset measured round-4 "
+    "(coverage knees: q1300, 3 utts, classic + neural)"
+    + ("" if q1 else "; quality rows missing — coverage results not found"),
+    sysq=q1)
+ram2, flash2 = knee_size(["L2", "L4"])
+q2 = knee_sysq("P2-knee")
 add("tube-rec-P2 (L0+L2.5k+L4)", "system-rec", 1, "any",
     "by-construction (as tube rungs)", None, p2r,
-    "model (derived sum)", None, None, "streaming, no dispersion FIR",
-    "tube-ladder P2 recommendation (no L1); quality of exact subset not "
-    "separately measured — see coverage matrix (round-4)")
+    "model (derived sum)", ram2, flash2, "streaming, no dispersion FIR",
+    "tube-ladder P2 recommendation (no L1); exact subset measured round-4 "
+    "(coverage knees); neural judges see NO consistent loss vs the P1 knee "
+    "(NISQA-MOS mean 2.38 vs 2.31, sign flips per utt; DNSMOS slightly "
+    "prefers P2 on all 3 utts)"
+    + ("" if q2 else "; quality rows missing — coverage results not found"),
+    sysq=q2)
 
 
 # --------------------------------------- resynth variants (metrics-adequacy)

@@ -62,7 +62,11 @@ FAMS = {
 def family_rows(fam):
     if fam == "engine":
         return [r for r in rows if r["family"] == "engine"]
-    return [r for r in rows if r["family"] in ("system-rung", "variant")]
+    # system-rec joined the family in round 4: the exact recommended subsets
+    # now carry MEASURED quality (coverage knees), so they may compete for
+    # front seats instead of hanging as cost-only rows.
+    return [r for r in rows
+            if r["family"] in ("system-rung", "variant", "system-rec")]
 
 
 def front_eligible(r):
