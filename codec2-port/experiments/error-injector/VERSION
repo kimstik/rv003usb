@@ -1,0 +1,7 @@
+# Pinned versions for the error-injector experiment.
+# The oracle build + dumps are shared with ../tube-ladder (same pin):
+CODEC2_REPO=https://github.com/drowe67/codec2
+CODEC2_COMMIT=310777b1c6f1af0bc7c72f5b32f80f6fd9136962
+# WARP-Q metric (same pin as tube-ladder):
+WARPQ_REPO=https://github.com/wjassim/WARP-Q.git
+WARPQ_COMMIT=bdf8616dc21dc4d7e8ae504bb162cc7f04b188a2
