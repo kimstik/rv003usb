@@ -1,0 +1,5 @@
+codec2 @ 310777b1c6f1af0bc7c72f5b32f80f6fd9136962
+Detected Codec2 file version 1.2 in mode 4
+oracle OK: c2enc/c2dec/c2sim built and ran
+  hts1a.raw 48000 B -> .c2 532 B -> dec 48000 B; c2sim out 48000 B
+  binaries: /home/user/rv003usb/.claude/worktrees/agent-aea3667e66a674811/codec2-port/experiments/metrics-adequacy/build/codec2/build_host/src/{c2enc,c2dec,c2sim}
