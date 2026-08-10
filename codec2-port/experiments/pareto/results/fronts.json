@@ -1,0 +1,1360 @@
+{
+ "assumptions": {
+  "overhead_ram_b": 512,
+  "overhead_flash_b": 6144,
+  "mhz_budget_frac": 0.5,
+  "note": "overhead reserve is an assumption (rest-of-codec), not a measurement"
+ },
+ "chips": {
+  "PY32F003x8": {
+   "profile": "P1",
+   "clock_mhz": 24,
+   "ram_b": 8192,
+   "flash_b": 65536,
+   "mhz_column": "mhz_p1",
+   "families": {
+    "engine": {
+     "jurisdiction": "engine jurisdiction: LSD hts1a vs sinusoid ref",
+     "feasible": [
+      "osc-bank L=20",
+      "osc-bank L=40",
+      "osc-bank L=80",
+      "impulse-iir",
+      "impulse-iir-csd-direct-3t",
+      "impulse-iir-csd-sos (jit)",
+      "impulse-iir-csd-sos (interp)",
+      "kl-lattice-csd3",
+      "lsp-allpass-csd3",
+      "svf-csd3",
+      "parallel-sos-csd3",
+      "parallel-sos-noise (G3+H1)",
+      "meander-sq L=20",
+      "meander-sq L=40",
+      "meander-sq L=80",
+      "meander-tri L=20",
+      "meander-tri L=40",
+      "meander-tri L=80",
+      "meander-mip-nn L=20",
+      "meander-mip-nn L=40",
+      "meander-mip-nn L=80",
+      "meander-mip-lin L=20",
+      "meander-mip-lin L=40",
+      "meander-mip-lin L=80",
+      "meander-blep L=20",
+      "meander-blep L=40",
+      "meander-blep L=80",
+      "cycle-replay L=20",
+      "cycle-replay L=40",
+      "cycle-replay L=80",
+      "cycle-replay-2x L=20",
+      "cycle-replay-2x L=40",
+      "cycle-replay-2x L=80",
+      "cycle-replay-nn L=20",
+      "cycle-replay-nn L=40",
+      "cycle-replay-nn L=80",
+      "cr-rt-lin L=20",
+      "cr-rt-lin L=40",
+      "cr-rt-lin L=80",
+      "cr-rt-lin-sym L=20",
+      "cr-rt-lin-sym L=40",
+      "cr-rt-lin-sym L=80"
+     ],
+     "feasible_unsized": [],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "impulse-iir",
+       "tier": "2",
+       "lsd_db": 5.67,
+       "mhz": 0.41,
+       "core_pct": 1.7,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (poles from bitstream-ordered LSP; float)"
+      },
+      {
+       "config": "cycle-replay L=80",
+       "tier": "",
+       "lsd_db": 4.64,
+       "mhz": 3.92,
+       "core_pct": 16.3,
+       "ram_b": "656",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      },
+      {
+       "config": "osc-bank L=80",
+       "tier": "0",
+       "lsd_db": 4.09,
+       "mhz": 5.14,
+       "core_pct": 21.4,
+       "ram_b": "496",
+       "flash_b": "1112",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (no feedback)"
+      },
+      {
+       "config": "cycle-replay-2x L=80",
+       "tier": "2",
+       "lsd_db": 3.88,
+       "mhz": 7.76,
+       "core_pct": 32.3,
+       "ram_b": "1296",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      }
+     ],
+     "front_crest": [],
+     "price_of_choice": [
+      {
+       "from": "impulse-iir",
+       "to": "cycle-replay L=80",
+       "dLSD_dB": 1.03,
+       "dMHz": 3.51,
+       "dB_per_MHz": 0.293,
+       "dFlash_B": 512.0,
+       "dB_per_KB_flash": 2.06
+      },
+      {
+       "from": "cycle-replay L=80",
+       "to": "osc-bank L=80",
+       "dLSD_dB": 0.55,
+       "dMHz": 1.22,
+       "dB_per_MHz": 0.451,
+       "dFlash_B": -200.0,
+       "dB_per_KB_flash": -2.816
+      },
+      {
+       "from": "osc-bank L=80",
+       "to": "cycle-replay-2x L=80",
+       "dLSD_dB": 0.21,
+       "dMHz": 2.62,
+       "dB_per_MHz": 0.08,
+       "dFlash_B": 200.0,
+       "dB_per_KB_flash": 1.075
+      }
+     ]
+    },
+    "system": {
+     "jurisdiction": "system jurisdiction: LSD q1300 vs codec2 phase0 ref",
+     "feasible": [
+      "tube-L0",
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "feasible_unsized": [
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "lsd_db": 7.982,
+       "mhz": 0.461,
+       "core_pct": 1.9,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "0.556",
+       "nisqa_mos": "1.909",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L1",
+       "tier": "2",
+       "lsd_db": 7.916,
+       "mhz": 0.669,
+       "core_pct": 2.8,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.56",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L4-0.50",
+       "tier": "1",
+       "lsd_db": 7.802,
+       "mhz": 1.722,
+       "core_pct": 7.2,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.553",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      }
+     ],
+     "front_crest": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "crest_delta_db": 1.418,
+       "lsd_db": 7.982,
+       "mhz": 0.461
+      },
+      {
+       "config": "smooth-mix-800",
+       "tier": "2",
+       "crest_delta_db": -0.15,
+       "lsd_db": 8.552,
+       "mhz": 0.757
+      }
+     ],
+     "price_of_choice": [
+      {
+       "from": "tube-L0",
+       "to": "tube-L1",
+       "dLSD_dB": 0.066,
+       "dMHz": 0.208,
+       "dB_per_MHz": 0.317,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      },
+      {
+       "from": "tube-L1",
+       "to": "tube-L4-0.50",
+       "dLSD_dB": 0.114,
+       "dMHz": 1.053,
+       "dB_per_MHz": 0.108,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      }
+     ]
+    }
+   }
+  },
+  "CH32V003": {
+   "profile": "P2",
+   "clock_mhz": 48,
+   "ram_b": 2048,
+   "flash_b": 16384,
+   "mhz_column": "mhz_p2",
+   "families": {
+    "engine": {
+     "jurisdiction": "engine jurisdiction: LSD hts1a vs sinusoid ref",
+     "feasible": [
+      "osc-bank L=20",
+      "impulse-iir",
+      "impulse-iir-csd-direct-3t",
+      "impulse-iir-csd-sos (jit)",
+      "impulse-iir-csd-sos (interp)",
+      "kl-lattice-csd3",
+      "lsp-allpass-csd3",
+      "svf-csd3",
+      "parallel-sos-csd3",
+      "parallel-sos-noise (G3+H1)",
+      "meander-sq L=20",
+      "meander-sq L=40",
+      "meander-sq L=80",
+      "meander-tri L=20",
+      "meander-tri L=40",
+      "meander-tri L=80",
+      "meander-mip-nn L=20",
+      "meander-blep L=20",
+      "cycle-replay L=20",
+      "cycle-replay L=40",
+      "cycle-replay-2x L=20",
+      "cycle-replay-nn L=20",
+      "cycle-replay-nn L=40",
+      "cr-rt-lin L=20",
+      "cr-rt-lin-sym L=20"
+     ],
+     "feasible_unsized": [],
+     "infeasible": {
+      "osc-bank L=40": "40.65 MHz > 50% of 48 MHz",
+      "osc-bank L=80": "93.58 MHz > 50% of 48 MHz",
+      "meander-mip-nn L=40": "41.00 MHz > 50% of 48 MHz",
+      "meander-mip-nn L=80": "82.01 MHz > 50% of 48 MHz",
+      "meander-mip-lin L=20": "40.34 MHz > 50% of 48 MHz",
+      "meander-mip-lin L=40": "80.68 MHz > 50% of 48 MHz",
+      "meander-mip-lin L=80": "161.37 MHz > 50% of 48 MHz",
+      "meander-blep L=40": "42.66 MHz > 50% of 48 MHz",
+      "meander-blep L=80": "84.35 MHz > 50% of 48 MHz",
+      "cycle-replay L=80": "81.42 MHz > 50% of 48 MHz",
+      "cycle-replay-2x L=40": "41.42 MHz > 50% of 48 MHz",
+      "cycle-replay-2x L=80": "161.42 MHz > 50% of 48 MHz",
+      "cycle-replay-nn L=80": "80.43 MHz > 50% of 48 MHz",
+      "cr-rt-lin L=40": "59.39 MHz > 50% of 48 MHz",
+      "cr-rt-lin L=80": "234.50 MHz > 50% of 48 MHz",
+      "cr-rt-lin-sym L=40": "30.21 MHz > 50% of 48 MHz",
+      "cr-rt-lin-sym L=80": "117.76 MHz > 50% of 48 MHz"
+     },
+     "front": [
+      {
+       "config": "impulse-iir-csd-sos (jit)",
+       "tier": "2",
+       "lsd_db": 5.91,
+       "mhz": 0.97,
+       "core_pct": 2.0,
+       "ram_b": "361",
+       "flash_b": "900",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-testing (SOS triangle + gamma-retry)"
+      },
+      {
+       "config": "lsp-allpass-csd3",
+       "tier": "2",
+       "lsd_db": 5.75,
+       "mhz": 1.51,
+       "core_pct": 3.1,
+       "ram_b": "90",
+       "flash_b": "1000",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (|cos w|<1 + bitstream LSP order)"
+      },
+      {
+       "config": "kl-lattice-csd3",
+       "tier": "2",
+       "lsd_db": 5.69,
+       "mhz": 2.07,
+       "core_pct": 4.3,
+       "ram_b": "75",
+       "flash_b": "1000",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (|k|<1)"
+      },
+      {
+       "config": "impulse-iir",
+       "tier": "2",
+       "lsd_db": 5.67,
+       "mhz": 10.76,
+       "core_pct": 22.4,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (poles from bitstream-ordered LSP; float)"
+      }
+     ],
+     "front_crest": [],
+     "price_of_choice": [
+      {
+       "from": "impulse-iir-csd-sos (jit)",
+       "to": "lsp-allpass-csd3",
+       "dLSD_dB": 0.16,
+       "dMHz": 0.54,
+       "dB_per_MHz": 0.296,
+       "dFlash_B": 100.0,
+       "dB_per_KB_flash": 1.638
+      },
+      {
+       "from": "lsp-allpass-csd3",
+       "to": "kl-lattice-csd3",
+       "dLSD_dB": 0.06,
+       "dMHz": 0.56,
+       "dB_per_MHz": 0.107,
+       "dFlash_B": 0.0,
+       "dB_per_KB_flash": null
+      },
+      {
+       "from": "kl-lattice-csd3",
+       "to": "impulse-iir",
+       "dLSD_dB": 0.02,
+       "dMHz": 8.69,
+       "dB_per_MHz": 0.002,
+       "dFlash_B": -200.0,
+       "dB_per_KB_flash": -0.102
+      }
+     ]
+    },
+    "system": {
+     "jurisdiction": "system jurisdiction: LSD q1300 vs codec2 phase0 ref",
+     "feasible": [
+      "tube-L0",
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "feasible_unsized": [
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "lsd_db": 7.982,
+       "mhz": 0.837,
+       "core_pct": 1.7,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "0.556",
+       "nisqa_mos": "1.909",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L1",
+       "tier": "2",
+       "lsd_db": 7.916,
+       "mhz": 1.253,
+       "core_pct": 2.6,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.56",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L4-0.50",
+       "tier": "1",
+       "lsd_db": 7.802,
+       "mhz": 3.348,
+       "core_pct": 7.0,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.553",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      }
+     ],
+     "front_crest": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "crest_delta_db": 1.418,
+       "lsd_db": 7.982,
+       "mhz": 0.837
+      },
+      {
+       "config": "smooth-mix-800",
+       "tier": "2",
+       "crest_delta_db": -0.15,
+       "lsd_db": 8.552,
+       "mhz": 1.421
+      }
+     ],
+     "price_of_choice": [
+      {
+       "from": "tube-L0",
+       "to": "tube-L1",
+       "dLSD_dB": 0.066,
+       "dMHz": 0.416,
+       "dB_per_MHz": 0.159,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      },
+      {
+       "from": "tube-L1",
+       "to": "tube-L4-0.50",
+       "dLSD_dB": 0.114,
+       "dMHz": 2.095,
+       "dB_per_MHz": 0.054,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      }
+     ]
+    }
+   }
+  },
+  "CH32V006": {
+   "profile": "P1",
+   "clock_mhz": 48,
+   "ram_b": 8192,
+   "flash_b": 63488,
+   "mhz_column": "mhz_p1",
+   "families": {
+    "engine": {
+     "jurisdiction": "engine jurisdiction: LSD hts1a vs sinusoid ref",
+     "feasible": [
+      "osc-bank L=20",
+      "osc-bank L=40",
+      "osc-bank L=80",
+      "impulse-iir",
+      "impulse-iir-csd-direct-3t",
+      "impulse-iir-csd-sos (jit)",
+      "impulse-iir-csd-sos (interp)",
+      "kl-lattice-csd3",
+      "lsp-allpass-csd3",
+      "svf-csd3",
+      "parallel-sos-csd3",
+      "parallel-sos-noise (G3+H1)",
+      "meander-sq L=20",
+      "meander-sq L=40",
+      "meander-sq L=80",
+      "meander-tri L=20",
+      "meander-tri L=40",
+      "meander-tri L=80",
+      "meander-mip-nn L=20",
+      "meander-mip-nn L=40",
+      "meander-mip-nn L=80",
+      "meander-mip-lin L=20",
+      "meander-mip-lin L=40",
+      "meander-mip-lin L=80",
+      "meander-blep L=20",
+      "meander-blep L=40",
+      "meander-blep L=80",
+      "cycle-replay L=20",
+      "cycle-replay L=40",
+      "cycle-replay L=80",
+      "cycle-replay-2x L=20",
+      "cycle-replay-2x L=40",
+      "cycle-replay-2x L=80",
+      "cycle-replay-nn L=20",
+      "cycle-replay-nn L=40",
+      "cycle-replay-nn L=80",
+      "cr-rt-lin L=20",
+      "cr-rt-lin L=40",
+      "cr-rt-lin L=80",
+      "cr-rt-lin-sym L=20",
+      "cr-rt-lin-sym L=40",
+      "cr-rt-lin-sym L=80"
+     ],
+     "feasible_unsized": [],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "impulse-iir",
+       "tier": "2",
+       "lsd_db": 5.67,
+       "mhz": 0.41,
+       "core_pct": 0.9,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (poles from bitstream-ordered LSP; float)"
+      },
+      {
+       "config": "cycle-replay L=80",
+       "tier": "",
+       "lsd_db": 4.64,
+       "mhz": 3.92,
+       "core_pct": 8.2,
+       "ram_b": "656",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      },
+      {
+       "config": "osc-bank L=80",
+       "tier": "0",
+       "lsd_db": 4.09,
+       "mhz": 5.14,
+       "core_pct": 10.7,
+       "ram_b": "496",
+       "flash_b": "1112",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (no feedback)"
+      },
+      {
+       "config": "cycle-replay-2x L=80",
+       "tier": "2",
+       "lsd_db": 3.88,
+       "mhz": 7.76,
+       "core_pct": 16.2,
+       "ram_b": "1296",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      }
+     ],
+     "front_crest": [],
+     "price_of_choice": [
+      {
+       "from": "impulse-iir",
+       "to": "cycle-replay L=80",
+       "dLSD_dB": 1.03,
+       "dMHz": 3.51,
+       "dB_per_MHz": 0.293,
+       "dFlash_B": 512.0,
+       "dB_per_KB_flash": 2.06
+      },
+      {
+       "from": "cycle-replay L=80",
+       "to": "osc-bank L=80",
+       "dLSD_dB": 0.55,
+       "dMHz": 1.22,
+       "dB_per_MHz": 0.451,
+       "dFlash_B": -200.0,
+       "dB_per_KB_flash": -2.816
+      },
+      {
+       "from": "osc-bank L=80",
+       "to": "cycle-replay-2x L=80",
+       "dLSD_dB": 0.21,
+       "dMHz": 2.62,
+       "dB_per_MHz": 0.08,
+       "dFlash_B": 200.0,
+       "dB_per_KB_flash": 1.075
+      }
+     ]
+    },
+    "system": {
+     "jurisdiction": "system jurisdiction: LSD q1300 vs codec2 phase0 ref",
+     "feasible": [
+      "tube-L0",
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "feasible_unsized": [
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "lsd_db": 7.982,
+       "mhz": 0.461,
+       "core_pct": 1.0,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "0.556",
+       "nisqa_mos": "1.909",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L1",
+       "tier": "2",
+       "lsd_db": 7.916,
+       "mhz": 0.669,
+       "core_pct": 1.4,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.56",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L4-0.50",
+       "tier": "1",
+       "lsd_db": 7.802,
+       "mhz": 1.722,
+       "core_pct": 3.6,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.553",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      }
+     ],
+     "front_crest": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "crest_delta_db": 1.418,
+       "lsd_db": 7.982,
+       "mhz": 0.461
+      },
+      {
+       "config": "smooth-mix-800",
+       "tier": "2",
+       "crest_delta_db": -0.15,
+       "lsd_db": 8.552,
+       "mhz": 0.757
+      }
+     ],
+     "price_of_choice": [
+      {
+       "from": "tube-L0",
+       "to": "tube-L1",
+       "dLSD_dB": 0.066,
+       "dMHz": 0.208,
+       "dB_per_MHz": 0.317,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      },
+      {
+       "from": "tube-L1",
+       "to": "tube-L4-0.50",
+       "dLSD_dB": 0.114,
+       "dMHz": 1.053,
+       "dB_per_MHz": 0.108,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      }
+     ]
+    }
+   }
+  },
+  "CH570": {
+   "profile": "P3",
+   "clock_mhz": 100,
+   "ram_b": 12288,
+   "flash_b": 245760,
+   "mhz_column": "mhz_p1",
+   "families": {
+    "engine": {
+     "jurisdiction": "engine jurisdiction: LSD hts1a vs sinusoid ref",
+     "feasible": [
+      "osc-bank L=20",
+      "osc-bank L=40",
+      "osc-bank L=80",
+      "impulse-iir",
+      "impulse-iir-csd-direct-3t",
+      "impulse-iir-csd-sos (jit)",
+      "impulse-iir-csd-sos (interp)",
+      "kl-lattice-csd3",
+      "lsp-allpass-csd3",
+      "svf-csd3",
+      "parallel-sos-csd3",
+      "parallel-sos-noise (G3+H1)",
+      "meander-sq L=20",
+      "meander-sq L=40",
+      "meander-sq L=80",
+      "meander-tri L=20",
+      "meander-tri L=40",
+      "meander-tri L=80",
+      "meander-mip-nn L=20",
+      "meander-mip-nn L=40",
+      "meander-mip-nn L=80",
+      "meander-mip-lin L=20",
+      "meander-mip-lin L=40",
+      "meander-mip-lin L=80",
+      "meander-blep L=20",
+      "meander-blep L=40",
+      "meander-blep L=80",
+      "cycle-replay L=20",
+      "cycle-replay L=40",
+      "cycle-replay L=80",
+      "cycle-replay-2x L=20",
+      "cycle-replay-2x L=40",
+      "cycle-replay-2x L=80",
+      "cycle-replay-nn L=20",
+      "cycle-replay-nn L=40",
+      "cycle-replay-nn L=80",
+      "cr-rt-lin L=20",
+      "cr-rt-lin L=40",
+      "cr-rt-lin L=80",
+      "cr-rt-lin-sym L=20",
+      "cr-rt-lin-sym L=40",
+      "cr-rt-lin-sym L=80"
+     ],
+     "feasible_unsized": [],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "impulse-iir",
+       "tier": "2",
+       "lsd_db": 5.67,
+       "mhz": 0.41,
+       "core_pct": 0.4,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (poles from bitstream-ordered LSP; float)"
+      },
+      {
+       "config": "cycle-replay L=80",
+       "tier": "",
+       "lsd_db": 4.64,
+       "mhz": 3.92,
+       "core_pct": 3.9,
+       "ram_b": "656",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      },
+      {
+       "config": "osc-bank L=80",
+       "tier": "0",
+       "lsd_db": 4.09,
+       "mhz": 5.14,
+       "core_pct": 5.1,
+       "ram_b": "496",
+       "flash_b": "1112",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (no feedback)"
+      },
+      {
+       "config": "cycle-replay-2x L=80",
+       "tier": "2",
+       "lsd_db": 3.88,
+       "mhz": 7.76,
+       "core_pct": 7.8,
+       "ram_b": "1296",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      }
+     ],
+     "front_crest": [],
+     "price_of_choice": [
+      {
+       "from": "impulse-iir",
+       "to": "cycle-replay L=80",
+       "dLSD_dB": 1.03,
+       "dMHz": 3.51,
+       "dB_per_MHz": 0.293,
+       "dFlash_B": 512.0,
+       "dB_per_KB_flash": 2.06
+      },
+      {
+       "from": "cycle-replay L=80",
+       "to": "osc-bank L=80",
+       "dLSD_dB": 0.55,
+       "dMHz": 1.22,
+       "dB_per_MHz": 0.451,
+       "dFlash_B": -200.0,
+       "dB_per_KB_flash": -2.816
+      },
+      {
+       "from": "osc-bank L=80",
+       "to": "cycle-replay-2x L=80",
+       "dLSD_dB": 0.21,
+       "dMHz": 2.62,
+       "dB_per_MHz": 0.08,
+       "dFlash_B": 200.0,
+       "dB_per_KB_flash": 1.075
+      }
+     ]
+    },
+    "system": {
+     "jurisdiction": "system jurisdiction: LSD q1300 vs codec2 phase0 ref",
+     "feasible": [
+      "tube-L0",
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "feasible_unsized": [
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "lsd_db": 7.982,
+       "mhz": 0.461,
+       "core_pct": 0.5,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "0.556",
+       "nisqa_mos": "1.909",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L1",
+       "tier": "2",
+       "lsd_db": 7.916,
+       "mhz": 0.669,
+       "core_pct": 0.7,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.56",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L4-0.50",
+       "tier": "1",
+       "lsd_db": 7.802,
+       "mhz": 1.722,
+       "core_pct": 1.7,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.553",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      }
+     ],
+     "front_crest": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "crest_delta_db": 1.418,
+       "lsd_db": 7.982,
+       "mhz": 0.461
+      },
+      {
+       "config": "smooth-mix-800",
+       "tier": "2",
+       "crest_delta_db": -0.15,
+       "lsd_db": 8.552,
+       "mhz": 0.757
+      }
+     ],
+     "price_of_choice": [
+      {
+       "from": "tube-L0",
+       "to": "tube-L1",
+       "dLSD_dB": 0.066,
+       "dMHz": 0.208,
+       "dB_per_MHz": 0.317,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      },
+      {
+       "from": "tube-L1",
+       "to": "tube-L4-0.50",
+       "dLSD_dB": 0.114,
+       "dMHz": 1.053,
+       "dB_per_MHz": 0.108,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      }
+     ]
+    }
+   }
+  },
+  "CH32V203": {
+   "profile": "P3",
+   "clock_mhz": 144,
+   "ram_b": 20480,
+   "flash_b": 65536,
+   "mhz_column": "mhz_p1",
+   "families": {
+    "engine": {
+     "jurisdiction": "engine jurisdiction: LSD hts1a vs sinusoid ref",
+     "feasible": [
+      "osc-bank L=20",
+      "osc-bank L=40",
+      "osc-bank L=80",
+      "impulse-iir",
+      "impulse-iir-csd-direct-3t",
+      "impulse-iir-csd-sos (jit)",
+      "impulse-iir-csd-sos (interp)",
+      "kl-lattice-csd3",
+      "lsp-allpass-csd3",
+      "svf-csd3",
+      "parallel-sos-csd3",
+      "parallel-sos-noise (G3+H1)",
+      "meander-sq L=20",
+      "meander-sq L=40",
+      "meander-sq L=80",
+      "meander-tri L=20",
+      "meander-tri L=40",
+      "meander-tri L=80",
+      "meander-mip-nn L=20",
+      "meander-mip-nn L=40",
+      "meander-mip-nn L=80",
+      "meander-mip-lin L=20",
+      "meander-mip-lin L=40",
+      "meander-mip-lin L=80",
+      "meander-blep L=20",
+      "meander-blep L=40",
+      "meander-blep L=80",
+      "cycle-replay L=20",
+      "cycle-replay L=40",
+      "cycle-replay L=80",
+      "cycle-replay-2x L=20",
+      "cycle-replay-2x L=40",
+      "cycle-replay-2x L=80",
+      "cycle-replay-nn L=20",
+      "cycle-replay-nn L=40",
+      "cycle-replay-nn L=80",
+      "cr-rt-lin L=20",
+      "cr-rt-lin L=40",
+      "cr-rt-lin L=80",
+      "cr-rt-lin-sym L=20",
+      "cr-rt-lin-sym L=40",
+      "cr-rt-lin-sym L=80"
+     ],
+     "feasible_unsized": [],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "impulse-iir",
+       "tier": "2",
+       "lsd_db": 5.67,
+       "mhz": 0.41,
+       "core_pct": 0.3,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (poles from bitstream-ordered LSP; float)"
+      },
+      {
+       "config": "cycle-replay L=80",
+       "tier": "",
+       "lsd_db": 4.64,
+       "mhz": 3.92,
+       "core_pct": 2.7,
+       "ram_b": "656",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      },
+      {
+       "config": "osc-bank L=80",
+       "tier": "0",
+       "lsd_db": 4.09,
+       "mhz": 5.14,
+       "core_pct": 3.6,
+       "ram_b": "496",
+       "flash_b": "1112",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (no feedback)"
+      },
+      {
+       "config": "cycle-replay-2x L=80",
+       "tier": "2",
+       "lsd_db": 3.88,
+       "mhz": 7.76,
+       "core_pct": 5.4,
+       "ram_b": "1296",
+       "flash_b": "1312",
+       "estoi_orig": "",
+       "nisqa_mos": "",
+       "stability": "by-construction (feedforward)"
+      }
+     ],
+     "front_crest": [],
+     "price_of_choice": [
+      {
+       "from": "impulse-iir",
+       "to": "cycle-replay L=80",
+       "dLSD_dB": 1.03,
+       "dMHz": 3.51,
+       "dB_per_MHz": 0.293,
+       "dFlash_B": 512.0,
+       "dB_per_KB_flash": 2.06
+      },
+      {
+       "from": "cycle-replay L=80",
+       "to": "osc-bank L=80",
+       "dLSD_dB": 0.55,
+       "dMHz": 1.22,
+       "dB_per_MHz": 0.451,
+       "dFlash_B": -200.0,
+       "dB_per_KB_flash": -2.816
+      },
+      {
+       "from": "osc-bank L=80",
+       "to": "cycle-replay-2x L=80",
+       "dLSD_dB": 0.21,
+       "dMHz": 2.62,
+       "dB_per_MHz": 0.08,
+       "dFlash_B": 200.0,
+       "dB_per_KB_flash": 1.075
+      }
+     ]
+    },
+    "system": {
+     "jurisdiction": "system jurisdiction: LSD q1300 vs codec2 phase0 ref",
+     "feasible": [
+      "tube-L0",
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "feasible_unsized": [
+      "tube-L1",
+      "tube-L2-1500",
+      "tube-L2-2000",
+      "tube-L2-2500",
+      "tube-L3",
+      "tube-L4-0.50",
+      "tube-L4-0.65",
+      "tube-L4-0.75",
+      "par-plain",
+      "par-noise-2000",
+      "par-noise-1000",
+      "smooth-mix-800",
+      "smooth-mix-1500"
+     ],
+     "infeasible": {},
+     "front": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "lsd_db": 7.982,
+       "mhz": 0.461,
+       "core_pct": 0.3,
+       "ram_b": "50",
+       "flash_b": "800",
+       "estoi_orig": "0.556",
+       "nisqa_mos": "1.909",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L1",
+       "tier": "2",
+       "lsd_db": 7.916,
+       "mhz": 0.669,
+       "core_pct": 0.5,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.56",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      },
+      {
+       "config": "tube-L4-0.50",
+       "tier": "1",
+       "lsd_db": 7.802,
+       "mhz": 1.722,
+       "core_pct": 1.2,
+       "ram_b": "",
+       "flash_b": "",
+       "estoi_orig": "0.553",
+       "nisqa_mos": "",
+       "stability": "by-construction (G8 cos-LSP data path; int32 state w/ guard bits per budgets.yaml)"
+      }
+     ],
+     "front_crest": [
+      {
+       "config": "tube-L0",
+       "tier": "2",
+       "crest_delta_db": 1.418,
+       "lsd_db": 7.982,
+       "mhz": 0.461
+      },
+      {
+       "config": "smooth-mix-800",
+       "tier": "2",
+       "crest_delta_db": -0.15,
+       "lsd_db": 8.552,
+       "mhz": 0.757
+      }
+     ],
+     "price_of_choice": [
+      {
+       "from": "tube-L0",
+       "to": "tube-L1",
+       "dLSD_dB": 0.066,
+       "dMHz": 0.208,
+       "dB_per_MHz": 0.317,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      },
+      {
+       "from": "tube-L1",
+       "to": "tube-L4-0.50",
+       "dLSD_dB": 0.114,
+       "dMHz": 1.053,
+       "dB_per_MHz": 0.108,
+       "dFlash_B": null,
+       "dB_per_KB_flash": null
+      }
+     ]
+    }
+   }
+  }
+ },
+ "feasibility_matrix": {
+  "tube-L0": {
+   "PY32F003x8": "1.9%",
+   "CH32V003": "1.7%",
+   "CH32V006": "1.0%",
+   "CH570": "0.5%",
+   "CH32V203": "0.3%"
+  },
+  "tube-L1": {
+   "PY32F003x8": "2.8% ?",
+   "CH32V003": "2.6% ?",
+   "CH32V006": "1.4% ?",
+   "CH570": "0.7% ?",
+   "CH32V203": "0.5% ?"
+  },
+  "tube-L2-2500": {
+   "PY32F003x8": "4.0% ?",
+   "CH32V003": "3.8% ?",
+   "CH32V006": "2.0% ?",
+   "CH570": "1.0% ?",
+   "CH32V203": "0.7% ?"
+  },
+  "tube-L4-0.50": {
+   "PY32F003x8": "7.2% ?",
+   "CH32V003": "7.0% ?",
+   "CH32V006": "3.6% ?",
+   "CH570": "1.7% ?",
+   "CH32V203": "1.2% ?"
+  },
+  "tube-rec-P1 (L0+L1+L2.5k+L4)": {
+   "PY32F003x8": "7.2% ?",
+   "CH32V003": "\u2014",
+   "CH32V006": "3.6% ?",
+   "CH570": "1.7% ?",
+   "CH32V203": "1.2% ?"
+  },
+  "tube-rec-P2 (L0+L2.5k+L4)": {
+   "PY32F003x8": "\u2014",
+   "CH32V003": "6.1% ?",
+   "CH32V006": "\u2014",
+   "CH570": "\u2014",
+   "CH32V203": "\u2014"
+  },
+  "impulse-iir": {
+   "PY32F003x8": "1.7%",
+   "CH32V003": "22.4%",
+   "CH32V006": "0.9%",
+   "CH570": "0.4%",
+   "CH32V203": "0.3%"
+  },
+  "impulse-iir-csd-sos (jit)": {
+   "PY32F003x8": "3.2%",
+   "CH32V003": "2.0%",
+   "CH32V006": "1.6%",
+   "CH570": "0.8%",
+   "CH32V203": "0.5%"
+  },
+  "impulse-iir-csd-sos (interp)": {
+   "PY32F003x8": "3.2%",
+   "CH32V003": "5.5%",
+   "CH32V006": "1.6%",
+   "CH570": "0.8%",
+   "CH32V203": "0.5%"
+  },
+  "lsp-allpass-csd3": {
+   "PY32F003x8": "6.3%",
+   "CH32V003": "3.1%",
+   "CH32V006": "3.1%",
+   "CH570": "1.5%",
+   "CH32V203": "1.0%"
+  },
+  "kl-lattice-csd3": {
+   "PY32F003x8": "8.6%",
+   "CH32V003": "4.3%",
+   "CH32V006": "4.3%",
+   "CH570": "2.1%",
+   "CH32V203": "1.4%"
+  },
+  "osc-bank L=80": {
+   "PY32F003x8": "21.4%",
+   "CH32V003": "\u2717 (93.58 MHz > 50% of 48 MHz)",
+   "CH32V006": "10.7%",
+   "CH570": "5.1%",
+   "CH32V203": "3.6%"
+  },
+  "cycle-replay-2x L=80": {
+   "PY32F003x8": "32.3%",
+   "CH32V003": "\u2717 (161.42 MHz > 50% of 48 MHz)",
+   "CH32V006": "16.2%",
+   "CH570": "7.8%",
+   "CH32V203": "5.4%"
+  },
+  "cr-rt-lin L=80": {
+   "PY32F003x8": "47.0%",
+   "CH32V003": "\u2717 (234.50 MHz > 50% of 48 MHz)",
+   "CH32V006": "23.5%",
+   "CH570": "11.3%",
+   "CH32V203": "7.8%"
+  },
+  "meander-tri L=80": {
+   "PY32F003x8": "21.7%",
+   "CH32V003": "10.9%",
+   "CH32V006": "10.9%",
+   "CH570": "5.2%",
+   "CH32V203": "3.6%"
+  },
+  "parallel-sos-csd3": {
+   "PY32F003x8": "8.3%",
+   "CH32V003": "4.1%",
+   "CH32V006": "4.1%",
+   "CH570": "2.0%",
+   "CH32V203": "1.4%"
+  }
+ }
+}
