@@ -1,0 +1,5 @@
+# Pinned oracle version. build_oracle.sh fetches exactly this commit.
+# Matches the commit the codec2-port research reports were written against
+# (codec2-port/README.md: "исходники codec2 @ 310777b").
+CODEC2_REPO=https://github.com/drowe67/codec2
+CODEC2_COMMIT=310777b1c6f1af0bc7c72f5b32f80f6fd9136962

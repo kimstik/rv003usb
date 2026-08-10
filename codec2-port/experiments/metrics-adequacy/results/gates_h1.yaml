@@ -1,0 +1,15 @@
+h1_asymmetric_gates:
+  comment: calibrated on metrics-adequacy stand; deltas vs the float reference decode
+    of the same bitstream
+  soft_noisiness:
+    nisqa_noi_drop_max: 1.73
+    dns_bak_drop_max: 0.59
+  hard_coloration:
+    nisqa_col_drop_max: 0.34
+    dns_sig_drop_max: 0.15
+  hard_discontinuity:
+    nisqa_dis_drop_max: 0.37
+  form_invariants:
+    crest_delta_abs_max_db: 1.0
+    comment: crest|d| was the only classic judge tracking the consensus; keep as cheap
+      CI-side buzz detector

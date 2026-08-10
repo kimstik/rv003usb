@@ -1,0 +1,138 @@
+  dnsmos hts1a.buzz-l0                      SIG 3.39 BAK 4.07 OVRL 3.12
+  dnsmos hts1a.buzz-pump@2                  SIG 2.44 BAK 3.93 OVRL 2.25
+  dnsmos hts1a.buzz-pump@4                  SIG 1.57 BAK 3.38 OVRL 1.48
+  dnsmos hts1a.buzz-sharp@2                 SIG 3.09 BAK 3.91 OVRL 2.79
+  dnsmos hts1a.buzz-sharp@4                 SIG 3.07 BAK 3.92 OVRL 2.77
+  dnsmos hts1a.buzz-spur@2                  SIG 3.14 BAK 3.86 OVRL 2.82
+  dnsmos hts1a.buzz-spur@4                  SIG 3.06 BAK 3.45 OVRL 2.61
+  dnsmos hts1a.orig                         SIG 3.28 BAK 4.06 OVRL 3.03
+  dnsmos hts1a.par-noise-1000               SIG 3.05 BAK 3.89 OVRL 2.74
+  dnsmos hts1a.par-noise-2000               SIG 3.23 BAK 3.96 OVRL 2.94
+  dnsmos hts1a.par-plain                    SIG 3.27 BAK 4.02 OVRL 2.99
+  dnsmos hts1a.ref                          SIG 3.11 BAK 3.92 OVRL 2.81
+  dnsmos hts1a.smooth-dither@2              SIG 3.10 BAK 3.92 OVRL 2.80
+  dnsmos hts1a.smooth-dither@4              SIG 3.08 BAK 3.90 OVRL 2.77
+  dnsmos hts1a.smooth-mix-1500              SIG 3.29 BAK 4.03 OVRL 3.01
+  dnsmos hts1a.smooth-mix-800               SIG 3.07 BAK 3.71 OVRL 2.69
+  dnsmos hts1a.smooth-valley@2              SIG 3.07 BAK 3.92 OVRL 2.77
+  dnsmos hts1a.smooth-valley@4              SIG 2.97 BAK 3.97 OVRL 2.70
+  dnsmos hts2a.buzz-l0                      SIG 3.08 BAK 3.33 OVRL 2.52
+  dnsmos hts2a.buzz-pump@2                  SIG 2.38 BAK 3.29 OVRL 1.97
+  dnsmos hts2a.buzz-pump@4                  SIG 1.09 BAK 3.03 OVRL 1.22
+  dnsmos hts2a.buzz-sharp@2                 SIG 3.24 BAK 3.75 OVRL 2.82
+  dnsmos hts2a.buzz-sharp@4                 SIG 3.32 BAK 3.77 OVRL 2.90
+  dnsmos hts2a.buzz-spur@2                  SIG 3.38 BAK 3.67 OVRL 2.90
+  dnsmos hts2a.buzz-spur@4                  SIG 3.43 BAK 3.22 OVRL 2.71
+  dnsmos hts2a.orig                         SIG 3.51 BAK 4.02 OVRL 3.20
+  dnsmos hts2a.par-noise-1000               SIG 2.66 BAK 3.09 OVRL 2.13
+  dnsmos hts2a.par-noise-2000               SIG 2.71 BAK 2.99 OVRL 2.13
+  dnsmos hts2a.par-plain                    SIG 2.81 BAK 2.83 OVRL 2.10
+  dnsmos hts2a.ref                          SIG 3.31 BAK 3.76 OVRL 2.88
+  dnsmos hts2a.smooth-dither@2              SIG 3.31 BAK 3.76 OVRL 2.89
+  dnsmos hts2a.smooth-dither@4              SIG 3.35 BAK 3.76 OVRL 2.92
+  dnsmos hts2a.smooth-mix-1500              SIG 2.95 BAK 3.21 OVRL 2.38
+  dnsmos hts2a.smooth-mix-800               SIG 2.35 BAK 3.25 OVRL 1.97
+  dnsmos hts2a.smooth-valley@2              SIG 3.32 BAK 3.77 OVRL 2.90
+  dnsmos hts2a.smooth-valley@4              SIG 3.28 BAK 3.83 OVRL 2.90
+  dnsmos ve9qrp_10s.buzz-l0                 SIG 3.46 BAK 3.09 OVRL 2.71
+  dnsmos ve9qrp_10s.buzz-pump@2             SIG 2.53 BAK 3.37 OVRL 2.15
+  dnsmos ve9qrp_10s.buzz-pump@4             SIG 1.40 BAK 2.83 OVRL 1.32
+  dnsmos ve9qrp_10s.buzz-sharp@2            SIG 3.42 BAK 3.76 OVRL 3.02
+  dnsmos ve9qrp_10s.buzz-sharp@4            SIG 3.38 BAK 3.76 OVRL 2.98
+  dnsmos ve9qrp_10s.buzz-spur@2             SIG 3.42 BAK 2.86 OVRL 2.55
+  dnsmos ve9qrp_10s.buzz-spur@4             SIG 3.46 BAK 2.59 OVRL 2.47
+  dnsmos ve9qrp_10s.orig                    SIG 3.62 BAK 3.26 OVRL 2.94
+  dnsmos ve9qrp_10s.par-noise-1000          SIG 3.16 BAK 2.45 OVRL 2.19
+  dnsmos ve9qrp_10s.par-noise-2000          SIG 3.27 BAK 2.81 OVRL 2.43
+  dnsmos ve9qrp_10s.par-plain               SIG 3.44 BAK 3.16 OVRL 2.73
+  dnsmos ve9qrp_10s.ref                     SIG 3.41 BAK 3.72 OVRL 2.99
+  dnsmos ve9qrp_10s.smooth-dither@2         SIG 3.39 BAK 3.27 OVRL 2.76
+  dnsmos ve9qrp_10s.smooth-dither@4         SIG 3.33 BAK 3.23 OVRL 2.71
+  dnsmos ve9qrp_10s.smooth-mix-1500         SIG 3.34 BAK 2.86 OVRL 2.49
+  dnsmos ve9qrp_10s.smooth-mix-800          SIG 2.63 BAK 2.22 OVRL 1.90
+  dnsmos ve9qrp_10s.smooth-valley@2         SIG 3.47 BAK 3.68 OVRL 3.03
+  dnsmos ve9qrp_10s.smooth-valley@4         SIG 3.36 BAK 3.56 OVRL 2.87
+Device: cpu
+Model architecture: NISQA_DIM
+Loaded pretrained model from /home/user/rv003usb/.claude/worktrees/agent-aea3667e66a674811/codec2-port/experiments/metrics-adequacy/build/nisqa_repo/weights/nisqa.tar
+# files: 72
+---> Predicting ...
+/usr/local/lib/python3.11/dist-packages/librosa/feature/spectral.py:2148: UserWarning: Empty filters detected in mel frequency basis. Some channels will produce empty responses. Try increasing your sampling rate (and fmax) or reducing n_mels.
+  mel_basis = filters.mel(sr=sr, n_fft=n_fft, **kwargs)
+/usr/local/lib/python3.11/dist-packages/librosa/feature/spectral.py:2148: UserWarning: Empty filters detected in mel frequency basis. Some channels will produce empty responses. Try increasing your sampling rate (and fmax) or reducing n_mels.
+  mel_basis = filters.mel(sr=sr, n_fft=n_fft, **kwargs)
+                                   deg  mos_pred  noi_pred  dis_pred  col_pred  loud_pred
+             hts2a.smooth-valley@4.wav  1.950013  2.334104  1.967279  1.817817   2.945976
+                        hts1a.orig.wav  3.621659  4.079124  4.311131  2.919042   3.982891
+             hts2a.ref_for.buzz-l0.wav  2.286139  3.214643  2.196810  1.858462   3.227392
+                     hts1a.buzz-l0.wav  1.551215  2.904495  1.761224  1.940212   3.000743
+                hts1a.buzz-sharp@4.wav  3.220990  3.587482  3.948814  2.534528   3.541664
+ve9qrp_10s.ref_for.smooth-mix-1500.wav  2.688832  2.816723  3.451917  2.454099   3.614893
+      hts2a.ref_for.smooth-mix-800.wav  2.286139  3.214643  2.196810  1.858462   3.227392
+         ve9qrp_10s.par-noise-2000.wav  1.514696  2.588285  2.344243  1.934524   3.079675
+        ve9qrp_10s.smooth-dither@4.wav  2.749428  2.008565  3.747790  2.554016   3.706270
+     hts2a.ref_for.smooth-mix-1500.wav  2.286139  3.214643  2.196810  1.858462   3.227392
+           hts1a.ref_for.par-plain.wav  3.149372  3.730067  3.987807  2.493417   3.560156
+      hts1a.ref_for.par-noise-1000.wav  3.149372  3.730067  3.987807  2.493417   3.560156
+             hts1a.ref_for.buzz-l0.wav  3.160698  3.748928  4.003085  2.498748   3.570802
+      hts2a.ref_for.par-noise-2000.wav  2.227629  3.186369  2.126860  1.827655   3.209648
+             hts2a.smooth-dither@2.wav  2.277958  3.095927  2.075158  1.913848   3.242580
+      ve9qrp_10s.ref_for.par-plain.wav  2.788996  2.880164  3.617436  2.511991   3.679503
+        ve9qrp_10s.ref_for.buzz-l0.wav  2.788996  2.880164  3.617436  2.511991   3.679503
+              hts2a.smooth-mix-800.wav  1.539312  2.889992  2.063823  1.659301   2.632479
+            ve9qrp_10s.buzz-spur@4.wav  2.301835  1.996433  3.981253  2.998727   3.512033
+                 hts1a.buzz-pump@2.wav  2.832954  3.541533  3.800264  2.343870   3.363788
+             hts2a.smooth-dither@4.wav  2.252196  2.984077  2.057402  1.875493   3.143327
+              hts2a.par-noise-1000.wav  1.203360  2.857935  1.942619  2.050352   2.758379
+        ve9qrp_10s.smooth-valley@2.wav  2.733831  2.787608  3.756510  2.542157   3.693791
+                   hts2a.par-plain.wav  1.168762  3.201378  1.650022  1.863053   2.564828
+        ve9qrp_10s.smooth-mix-1500.wav  2.224743  2.807553  3.234232  2.141448   3.490635
+        ve9qrp_10s.smooth-valley@4.wav  1.981397  2.435975  3.250465  2.171562   3.368610
+                 hts2a.buzz-spur@2.wav  2.360060  2.529949  2.505757  2.030136   3.266775
+                hts2a.buzz-sharp@2.wav  2.538944  3.132604  2.647109  1.891636   3.241292
+ ve9qrp_10s.ref_for.par-noise-2000.wav  2.681858  2.823360  3.427052  2.441174   3.613071
+              hts1a.smooth-mix-800.wav  1.732193  2.344446  3.146484  2.011415   2.721467
+             hts2a.smooth-valley@2.wav  2.428412  3.028927  2.442509  1.920200   3.269089
+            ve9qrp_10s.buzz-pump@2.wav  2.421233  2.709208  3.218085  2.291958   3.588700
+                hts2a.buzz-sharp@4.wav  2.560824  3.107136  2.744125  1.838004   3.161473
+                hts1a.buzz-sharp@2.wav  3.245627  3.751092  3.991305  2.543184   3.596112
+                 hts1a.buzz-pump@4.wav  2.044090  2.469975  3.242794  2.080496   2.931083
+                    ve9qrp_10s.ref.wav  2.788996  2.880164  3.617436  2.511991   3.679503
+             hts2a.smooth-mix-1500.wav  1.740792  2.808446  2.029835  1.798260   2.725636
+              hts2a.par-noise-2000.wav  1.156822  2.815779  1.750991  2.002250   2.555416
+              hts1a.par-noise-2000.wav  2.256758  3.211493  2.720617  2.295677   3.003452
+         ve9qrp_10s.smooth-mix-800.wav  1.821441  2.500613  3.260379  2.076740   3.295959
+             hts1a.smooth-valley@4.wav  2.058985  2.090117  3.655159  2.184137   2.961619
+                 hts1a.buzz-spur@2.wav  2.703097  2.230273  3.952635  3.212749   3.675744
+                 hts2a.buzz-pump@4.wav  1.079713  3.043802  1.488190  1.508142   2.577593
+ ve9qrp_10s.ref_for.par-noise-1000.wav  2.681858  2.823360  3.427052  2.441174   3.613071
+     hts1a.ref_for.smooth-mix-1500.wav  3.160698  3.748928  4.003085  2.498748   3.570802
+                 hts2a.buzz-spur@4.wav  2.129033  1.908972  2.378216  2.000562   2.909514
+                ve9qrp_10s.buzz-l0.wav  1.969007  2.769236  2.374257  2.037407   3.231778
+           hts2a.ref_for.par-plain.wav  2.227629  3.186369  2.126860  1.827655   3.209648
+                         hts1a.ref.wav  3.141527  3.718654  3.977798  2.489990   3.553985
+                 hts2a.buzz-pump@2.wav  1.953636  2.799438  2.171294  1.688203   2.971267
+         ve9qrp_10s.par-noise-1000.wav  1.271305  2.436578  2.570492  1.850621   2.844078
+      hts1a.ref_for.par-noise-2000.wav  3.149372  3.730067  3.987807  2.493417   3.560156
+             hts1a.smooth-mix-1500.wav  2.048631  2.546732  3.413043  2.130847   2.951473
+                   ve9qrp_10s.orig.wav  3.451218  3.236455  3.880565  2.935235   3.982410
+           ve9qrp_10s.buzz-sharp@2.wav  3.070791  3.041683  3.937290  2.681373   3.766299
+             hts1a.smooth-dither@2.wav  3.094056  3.674821  4.012993  2.453254   3.492655
+                        hts2a.orig.wav  3.503520  3.675982  4.168155  3.022256   3.541856
+           ve9qrp_10s.buzz-sharp@4.wav  3.115467  3.139309  3.988657  2.718328   3.773263
+                   hts1a.par-plain.wav  1.677766  3.202457  1.901625  2.207062   2.997832
+             hts1a.smooth-dither@4.wav  2.956459  3.362314  4.132016  2.494124   3.448537
+            ve9qrp_10s.buzz-pump@4.wav  1.445340  2.377694  2.180630  1.959925   3.078383
+             hts1a.smooth-valley@2.wav  2.843836  3.535914  3.989809  2.417939   3.424324
+      hts1a.ref_for.smooth-mix-800.wav  3.160698  3.748928  4.003085  2.498748   3.570802
+              ve9qrp_10s.par-plain.wav  1.675527  2.814180  2.048116  1.910715   3.105275
+ ve9qrp_10s.ref_for.smooth-mix-800.wav  2.681858  2.823360  3.427052  2.441174   3.613071
+                 hts1a.buzz-spur@4.wav  2.235014  2.255556  4.311716  3.461203   3.183888
+      hts2a.ref_for.par-noise-1000.wav  2.227629  3.186369  2.126860  1.827655   3.209648
+            ve9qrp_10s.buzz-spur@2.wav  2.582390  2.014584  3.677001  2.591222   3.541025
+                         hts2a.ref.wav  2.286139  3.214643  2.196810  1.858462   3.227392
+                     hts2a.buzz-l0.wav  2.206269  3.276372  2.415879  1.939459   3.113627
+        ve9qrp_10s.smooth-dither@2.wav  2.730491  2.317224  3.595797  2.471725   3.651031
+              hts1a.par-noise-1000.wav  1.669781  2.446782  3.106650  2.281254   2.757877
+  nisqa: scored 54 files
+wrote results/neural.csv (54 rows)
