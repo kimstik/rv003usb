@@ -1,0 +1,140 @@
+{
+ "n_pairs": 56,
+ "judges": {
+  "LSD": {
+   "agree": 14,
+   "against": 1,
+   "tie": 41,
+   "agree_rate": 0.933,
+   "pro_smooth": 2,
+   "pro_buzzy": 13,
+   "ties": 41
+  },
+  "segSNR": {
+   "agree": 23,
+   "against": 15,
+   "tie": 18,
+   "agree_rate": 0.605,
+   "pro_smooth": 38,
+   "pro_buzzy": 0,
+   "ties": 18
+  },
+  "NMR": {
+   "agree": 33,
+   "against": 21,
+   "tie": 2,
+   "agree_rate": 0.611,
+   "pro_smooth": 33,
+   "pro_buzzy": 21,
+   "ties": 2
+  },
+  "crest|d|": {
+   "agree": 14,
+   "against": 9,
+   "tie": 33,
+   "agree_rate": 0.609,
+   "pro_smooth": 23,
+   "pro_buzzy": 0,
+   "ties": 33
+  },
+  "ESTOI_ref": {
+   "agree": 25,
+   "against": 10,
+   "tie": 21,
+   "agree_rate": 0.714,
+   "pro_smooth": 16,
+   "pro_buzzy": 19,
+   "ties": 21
+  },
+  "ESTOI_orig": {
+   "agree": 27,
+   "against": 6,
+   "tie": 23,
+   "agree_rate": 0.818,
+   "pro_smooth": 5,
+   "pro_buzzy": 28,
+   "ties": 23
+  },
+  "WARP-Q": {
+   "agree": 33,
+   "against": 20,
+   "tie": 3,
+   "agree_rate": 0.623,
+   "pro_smooth": 12,
+   "pro_buzzy": 41,
+   "ties": 3
+  },
+  "DNS_SIG": {
+   "agree": 30,
+   "against": 12,
+   "tie": 14,
+   "agree_rate": 0.714,
+   "pro_smooth": 16,
+   "pro_buzzy": 26,
+   "ties": 14
+  },
+  "DNS_BAK": {
+   "agree": 36,
+   "against": 9,
+   "tie": 11,
+   "agree_rate": 0.8,
+   "pro_smooth": 26,
+   "pro_buzzy": 19,
+   "ties": 11
+  },
+  "DNS_OVRL": {
+   "agree": 34,
+   "against": 9,
+   "tie": 13,
+   "agree_rate": 0.791,
+   "pro_smooth": 23,
+   "pro_buzzy": 20,
+   "ties": 13
+  },
+  "DNS_P808": {
+   "agree": 36,
+   "against": 9,
+   "tie": 11,
+   "agree_rate": 0.8,
+   "pro_smooth": 19,
+   "pro_buzzy": 26,
+   "ties": 11
+  },
+  "NISQA_MOS": {
+   "agree": 46,
+   "against": 6,
+   "tie": 4,
+   "agree_rate": 0.885,
+   "pro_smooth": 29,
+   "pro_buzzy": 23,
+   "ties": 4
+  },
+  "NISQA_Noi": {
+   "agree": 39,
+   "against": 11,
+   "tie": 6,
+   "agree_rate": 0.78,
+   "pro_smooth": 17,
+   "pro_buzzy": 33,
+   "ties": 6
+  },
+  "NISQA_Col": {
+   "agree": 31,
+   "against": 17,
+   "tie": 8,
+   "agree_rate": 0.646,
+   "pro_smooth": 21,
+   "pro_buzzy": 27,
+   "ties": 8
+  },
+  "NISQA_Dis": {
+   "agree": 33,
+   "against": 19,
+   "tie": 4,
+   "agree_rate": 0.635,
+   "pro_smooth": 31,
+   "pro_buzzy": 21,
+   "ties": 4
+  }
+ }
+}
