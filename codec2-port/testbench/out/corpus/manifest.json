@@ -1,0 +1,100 @@
+{
+ "fs": 8000,
+ "max_s": 8.0,
+ "frame_samples": 320,
+ "codec2_commit": "310777b1c6f1af0bc7c72f5b32f80f6fd9136962",
+ "items": [
+  {
+   "utt": "hts1a",
+   "kind": "repo",
+   "who": "male, studio (HTS corpus)",
+   "source": "codec2 @310777b raw/hts1a.raw",
+   "src_fs": 8000,
+   "resampled": false,
+   "samples": 24000,
+   "seconds": 3.0,
+   "frames_40ms": 75,
+   "sha256_16": "95c1671d643dfb8c",
+   "peak": 21322,
+   "rms_dbfs": -24.19
+  },
+  {
+   "utt": "hts2a",
+   "kind": "repo",
+   "who": "female, studio (HTS corpus)",
+   "source": "codec2 @310777b raw/hts2a.raw",
+   "src_fs": 8000,
+   "resampled": false,
+   "samples": 24000,
+   "seconds": 3.0,
+   "frames_40ms": 75,
+   "sha256_16": "8121879571101c45",
+   "peak": 18939,
+   "rms_dbfs": -23.97
+  },
+  {
+   "utt": "kristoff",
+   "kind": "repo",
+   "who": "male, accented, close mic",
+   "source": "codec2 @310777b raw/kristoff.raw",
+   "src_fs": 8000,
+   "resampled": false,
+   "samples": 40000,
+   "seconds": 5.0,
+   "frames_40ms": 125,
+   "sha256_16": "d1a955308fd4fc08",
+   "peak": 25555,
+   "rms_dbfs": -20.84
+  },
+  {
+   "utt": "ve9qrp_10s",
+   "kind": "repo",
+   "who": "male, amateur-radio recording",
+   "source": "codec2 @310777b raw/ve9qrp_10s.raw",
+   "src_fs": 8000,
+   "resampled": false,
+   "samples": 64000,
+   "seconds": 8.0,
+   "frames_40ms": 200,
+   "sha256_16": "a9e0e11669f95b55",
+   "peak": 32767,
+   "rms_dbfs": -23.89
+  },
+  {
+   "utt": "mmt1",
+   "kind": "ext",
+   "who": "male over truck/road background noise",
+   "source": "https://www.rowetel.com/downloads/codec2/mmt1.wav",
+   "src_fs": 8000,
+   "resampled": false,
+   "samples": 32000,
+   "seconds": 4.0,
+   "frames_40ms": 100,
+   "sha256_16": "0bdc692df9369bc5",
+   "peak": 27282,
+   "rms_dbfs": -22.39
+  },
+  {
+   "utt": "cq_ref",
+   "kind": "ext",
+   "who": "male, CQ call reference recording",
+   "source": "https://www.rowetel.com/downloads/codec2/2200/cq_ref.wav",
+   "src_fs": 8000,
+   "resampled": false,
+   "samples": 64000,
+   "seconds": 8.0,
+   "frames_40ms": 200,
+   "sha256_16": "86705fa97aba9904",
+   "peak": 32468,
+   "rms_dbfs": -16.75
+  }
+ ],
+ "missing": [],
+ "crosscheck": {
+  "web_file": "hts2a_ext.wav",
+  "url": "https://www.rowetel.com/downloads/codec2/hts2a.wav",
+  "repo_file": "raw/hts2a.raw",
+  "identical": true,
+  "sha256_16": "8121879571101c45"
+ }
+}
