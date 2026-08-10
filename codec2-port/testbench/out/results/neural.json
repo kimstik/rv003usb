@@ -1,0 +1,319 @@
+{
+ "nisqa": {
+  "cq_ref.A.wav": {
+   "nisqa_mos": 3.434,
+   "nisqa_noi": 3.603,
+   "nisqa_col": 2.844,
+   "nisqa_dis": 4.143,
+   "nisqa_loud": 3.648
+  },
+  "hts2a.B.wav": {
+   "nisqa_mos": 2.337,
+   "nisqa_noi": 3.245,
+   "nisqa_col": 1.897,
+   "nisqa_dis": 2.273,
+   "nisqa_loud": 3.245
+  },
+  "hts2a.A.wav": {
+   "nisqa_mos": 3.504,
+   "nisqa_noi": 3.676,
+   "nisqa_col": 3.022,
+   "nisqa_dis": 4.168,
+   "nisqa_loud": 3.542
+  },
+  "mmt1.B.wav": {
+   "nisqa_mos": 1.245,
+   "nisqa_noi": 1.881,
+   "nisqa_col": 2.55,
+   "nisqa_dis": 3.98,
+   "nisqa_loud": 3.117
+  },
+  "kristoff.E.wav": {
+   "nisqa_mos": 1.051,
+   "nisqa_noi": 3.0,
+   "nisqa_col": 1.655,
+   "nisqa_dis": 1.316,
+   "nisqa_loud": 2.884
+  },
+  "mmt1.E.wav": {
+   "nisqa_mos": 1.226,
+   "nisqa_noi": 1.563,
+   "nisqa_col": 2.278,
+   "nisqa_dis": 2.2,
+   "nisqa_loud": 2.77
+  },
+  "hts1a.A.wav": {
+   "nisqa_mos": 3.622,
+   "nisqa_noi": 4.079,
+   "nisqa_col": 2.919,
+   "nisqa_dis": 4.311,
+   "nisqa_loud": 3.983
+  },
+  "ve9qrp_10s.A.wav": {
+   "nisqa_mos": 3.429,
+   "nisqa_noi": 3.22,
+   "nisqa_col": 2.888,
+   "nisqa_dis": 3.856,
+   "nisqa_loud": 3.969
+  },
+  "ve9qrp_10s.B.wav": {
+   "nisqa_mos": 2.562,
+   "nisqa_noi": 2.83,
+   "nisqa_col": 2.402,
+   "nisqa_dis": 3.419,
+   "nisqa_loud": 3.609
+  },
+  "hts1a.B.wav": {
+   "nisqa_mos": 3.172,
+   "nisqa_noi": 3.734,
+   "nisqa_col": 2.496,
+   "nisqa_dis": 3.956,
+   "nisqa_loud": 3.588
+  },
+  "hts1a.C.wav": {
+   "nisqa_mos": 2.567,
+   "nisqa_noi": 2.921,
+   "nisqa_col": 2.099,
+   "nisqa_dis": 3.355,
+   "nisqa_loud": 3.218
+  },
+  "hts2a.C.wav": {
+   "nisqa_mos": 1.861,
+   "nisqa_noi": 3.283,
+   "nisqa_col": 1.81,
+   "nisqa_dis": 2.17,
+   "nisqa_loud": 3.052
+  },
+  "kristoff.B.wav": {
+   "nisqa_mos": 2.268,
+   "nisqa_noi": 2.891,
+   "nisqa_col": 2.026,
+   "nisqa_dis": 3.061,
+   "nisqa_loud": 3.009
+  },
+  "hts1a.E.wav": {
+   "nisqa_mos": 1.355,
+   "nisqa_noi": 3.333,
+   "nisqa_col": 1.786,
+   "nisqa_dis": 1.566,
+   "nisqa_loud": 2.881
+  },
+  "kristoff.A.wav": {
+   "nisqa_mos": 3.524,
+   "nisqa_noi": 3.646,
+   "nisqa_col": 3.289,
+   "nisqa_dis": 4.197,
+   "nisqa_loud": 3.729
+  },
+  "ve9qrp_10s.C.wav": {
+   "nisqa_mos": 2.156,
+   "nisqa_noi": 2.832,
+   "nisqa_col": 2.148,
+   "nisqa_dis": 2.921,
+   "nisqa_loud": 3.452
+  },
+  "mmt1.A.wav": {
+   "nisqa_mos": 1.845,
+   "nisqa_noi": 1.831,
+   "nisqa_col": 2.528,
+   "nisqa_dis": 4.222,
+   "nisqa_loud": 3.397
+  },
+  "hts2a.E.wav": {
+   "nisqa_mos": 1.227,
+   "nisqa_noi": 3.275,
+   "nisqa_col": 1.669,
+   "nisqa_dis": 1.539,
+   "nisqa_loud": 2.875
+  },
+  "mmt1.C.wav": {
+   "nisqa_mos": 1.226,
+   "nisqa_noi": 1.887,
+   "nisqa_col": 2.49,
+   "nisqa_dis": 3.683,
+   "nisqa_loud": 2.922
+  },
+  "kristoff.C.wav": {
+   "nisqa_mos": 1.429,
+   "nisqa_noi": 3.075,
+   "nisqa_col": 1.658,
+   "nisqa_dis": 1.8,
+   "nisqa_loud": 2.863
+  },
+  "ve9qrp_10s.E.wav": {
+   "nisqa_mos": 1.647,
+   "nisqa_noi": 2.52,
+   "nisqa_col": 1.99,
+   "nisqa_dis": 2.097,
+   "nisqa_loud": 3.08
+  },
+  "cq_ref.E.wav": {
+   "nisqa_mos": 1.392,
+   "nisqa_noi": 3.165,
+   "nisqa_col": 1.92,
+   "nisqa_dis": 1.701,
+   "nisqa_loud": 2.964
+  },
+  "cq_ref.B.wav": {
+   "nisqa_mos": 2.562,
+   "nisqa_noi": 3.618,
+   "nisqa_col": 2.335,
+   "nisqa_dis": 3.884,
+   "nisqa_loud": 3.136
+  },
+  "cq_ref.C.wav": {
+   "nisqa_mos": 2.256,
+   "nisqa_noi": 3.193,
+   "nisqa_col": 1.969,
+   "nisqa_dis": 2.84,
+   "nisqa_loud": 3.039
+  }
+ },
+ "dnsmos": {
+  "cq_ref.A.wav": {
+   "dns_sig": 3.451,
+   "dns_bak": 4.126,
+   "dns_ovrl": 3.238,
+   "dns_p808": 3.326
+  },
+  "cq_ref.B.wav": {
+   "dns_sig": 3.114,
+   "dns_bak": 4.095,
+   "dns_ovrl": 2.904,
+   "dns_p808": 2.565
+  },
+  "cq_ref.C.wav": {
+   "dns_sig": 3.071,
+   "dns_bak": 3.873,
+   "dns_ovrl": 2.748,
+   "dns_p808": 2.56
+  },
+  "cq_ref.E.wav": {
+   "dns_sig": 3.159,
+   "dns_bak": 3.96,
+   "dns_ovrl": 2.883,
+   "dns_p808": 2.471
+  },
+  "hts1a.A.wav": {
+   "dns_sig": 3.284,
+   "dns_bak": 4.064,
+   "dns_ovrl": 3.027,
+   "dns_p808": 3.174
+  },
+  "hts1a.B.wav": {
+   "dns_sig": 3.104,
+   "dns_bak": 3.941,
+   "dns_ovrl": 2.803,
+   "dns_p808": 2.972
+  },
+  "hts1a.C.wav": {
+   "dns_sig": 2.951,
+   "dns_bak": 3.994,
+   "dns_ovrl": 2.72,
+   "dns_p808": 3.063
+  },
+  "hts1a.E.wav": {
+   "dns_sig": 2.886,
+   "dns_bak": 3.905,
+   "dns_ovrl": 2.632,
+   "dns_p808": 2.937
+  },
+  "hts2a.A.wav": {
+   "dns_sig": 3.508,
+   "dns_bak": 4.018,
+   "dns_ovrl": 3.199,
+   "dns_p808": 3.427
+  },
+  "hts2a.B.wav": {
+   "dns_sig": 3.413,
+   "dns_bak": 3.82,
+   "dns_ovrl": 2.986,
+   "dns_p808": 3.219
+  },
+  "hts2a.C.wav": {
+   "dns_sig": 2.571,
+   "dns_bak": 3.139,
+   "dns_ovrl": 2.058,
+   "dns_p808": 3.086
+  },
+  "hts2a.E.wav": {
+   "dns_sig": 2.345,
+   "dns_bak": 2.583,
+   "dns_ovrl": 1.739,
+   "dns_p808": 3.03
+  },
+  "kristoff.A.wav": {
+   "dns_sig": 3.487,
+   "dns_bak": 3.999,
+   "dns_ovrl": 3.19,
+   "dns_p808": 2.96
+  },
+  "kristoff.B.wav": {
+   "dns_sig": 3.342,
+   "dns_bak": 4.011,
+   "dns_ovrl": 3.047,
+   "dns_p808": 2.539
+  },
+  "kristoff.C.wav": {
+   "dns_sig": 3.465,
+   "dns_bak": 3.909,
+   "dns_ovrl": 3.09,
+   "dns_p808": 2.552
+  },
+  "kristoff.E.wav": {
+   "dns_sig": 3.419,
+   "dns_bak": 3.886,
+   "dns_ovrl": 3.05,
+   "dns_p808": 2.676
+  },
+  "mmt1.A.wav": {
+   "dns_sig": 3.342,
+   "dns_bak": 2.595,
+   "dns_ovrl": 2.431,
+   "dns_p808": 2.676
+  },
+  "mmt1.B.wav": {
+   "dns_sig": 3.335,
+   "dns_bak": 2.572,
+   "dns_ovrl": 2.303,
+   "dns_p808": 2.587
+  },
+  "mmt1.C.wav": {
+   "dns_sig": 2.69,
+   "dns_bak": 1.806,
+   "dns_ovrl": 1.716,
+   "dns_p808": 2.591
+  },
+  "mmt1.E.wav": {
+   "dns_sig": 1.411,
+   "dns_bak": 1.159,
+   "dns_ovrl": 1.227,
+   "dns_p808": 2.459
+  },
+  "ve9qrp_10s.A.wav": {
+   "dns_sig": 3.6,
+   "dns_bak": 3.343,
+   "dns_ovrl": 2.956,
+   "dns_p808": 3.193
+  },
+  "ve9qrp_10s.B.wav": {
+   "dns_sig": 3.434,
+   "dns_bak": 3.649,
+   "dns_ovrl": 2.985,
+   "dns_p808": 2.636
+  },
+  "ve9qrp_10s.C.wav": {
+   "dns_sig": 3.196,
+   "dns_bak": 2.854,
+   "dns_ovrl": 2.407,
+   "dns_p808": 2.651
+  },
+  "ve9qrp_10s.E.wav": {
+   "dns_sig": 3.213,
+   "dns_bak": 2.987,
+   "dns_ovrl": 2.485,
+   "dns_p808": 2.634
+  }
+ },
+ "notes": []
+}
