@@ -1,0 +1,26 @@
+sizeof(c2tube_dec state struct) = 236 bytes
+
+decode_frame scratch (stack, per 40 ms frame call):
+  exc[84] int32 ................. 336 B
+  ybuf[80] int32 ................ 320 B
+  pP/pQ[12] int64 (poly build) .. 192 B   (int32 on target: 96 B)
+  a_q12/num/den[11] int32 ....... 132 B
+  h[22] int64 (tilt) ............ 176 B   (int32 on target: 88 B)
+  f_q2/c_q14/cp/cq int32 ........ 120 B
+  ctp/ctq csd_terms[10] ......... 150 B
+  misc locals ................... ~64 B
+  TOTAL scratch ................. ~1.5 KB (host int64 forms)
+                                  ~1.2 KB (target int32 forms)
+
+== flash census: host x86-64 -Os (proxy) ==
+   text	   data	    bss	    dec	    hex	filename
+   5741	      0	      4	   5745	   1671	/home/user/rv003usb/.claude/worktrees/agent-a388a024a00e1f3a3/codec2-port/proto/decoder/build/c2tube_dec_host.o
+
+== flash census: riscv64-unknown-elf-gcc -march=rv32ec_zicsr -mabi=ilp32e -Os ==
+   text	   data	    bss	    dec	    hex	filename
+   6706	      0	      4	   6710	   1a36	/home/user/rv003usb/.claude/worktrees/agent-a388a024a00e1f3a3/codec2-port/proto/decoder/build/c2tube_dec_rv32ec.o
+  0 .text         000015f2  00000000  00000000  00000034  2**1
+  3 .rodata       00000422  00000000  00000000  00001628  2**2
+  5 .srodata      0000001e  00000000  00000000  00001a4c  2**2
+
+tables written; .rodata payload ~= 1074 bytes
