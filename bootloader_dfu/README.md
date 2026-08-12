@@ -11,6 +11,13 @@ modeled on the samdx1-usb-dfu-bootloader concept. Works with **stock
 * USB identity: VID:PID `1209:B003`, `bcdDevice 0x0201` (HID loader reports
   `0x0200`, V003-family loaders `0x0000`). Serial string `W15D`.
 
+## Entry (WG015)
+
+Three ways into the loader: the app's one-shot RTC_REG[0] flag, a failed app
+CRC32, or a **double-tap reset** — press reset twice within 500 ms (magic in
+RTC_REG[1], cleared on power-up).  Disable by setting `DFU_DBLTAP_MS 0` in
+`dfu_015.h`; the window costs that delay on every normal boot.
+
 ## Usage
 
 ```sh

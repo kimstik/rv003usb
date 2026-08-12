@@ -37,15 +37,39 @@ static inline void dfu_port_irq_enable( void )
 	asm volatile( "csrs mstatus, %0" : : "r"(WG015_MSTATUS_MIE) );
 }
 
-// One-shot flag: read RTC_REG[0], clear it, honor only after a soft reset
-// (a stale flag must not redirect a cold power-on — PLAN boot-6).
+// Double-tap reset entry (Adafruit/samd11 idiom, also used by wch-uf2): a
+// second reset inside the window leaves the magic in place -> stay in the
+// loader.  Costs every normal boot DFU_DBLTAP_MS of delay; set 0 to disable
+// (then only the flag and a failed CRC keep us here).
+#define DFU_DBLTAP_MS    500
+#define DFU_DBLTAP_MAGIC 0xF02669EFu // samd11's value; any non-trivial word
+#define DFU_DBLTAP_REG   1           // RTC_REG[1]; [0] is the boot flag
+
+// Entry flag: RTC_REG[0] one-shot, honored only after a soft reset (a stale
+// flag must not redirect a cold power-on — PLAN boot-6), then double-tap.
 static inline uint32_t dfu_port_flag_read_and_clear( void )
 {
 	uint32_t flag = WG015_RTC_REG(0);
 	if( flag ) WG015_RTC_REG(0) = 0;
 	if( !( RCU->RSTSTAT & RCU_RSTSTAT_SYSRST ) )
 		flag = 0;
-	return flag;
+	if( flag ) return flag; // explicit request wins, no tap window
+
+#if DFU_DBLTAP_MS
+	if( RCU->RSTSTAT & RCU_RSTSTAT_POR )
+		WG015_RTC_REG(DFU_DBLTAP_REG) = 0; // power-up is never a "tap"
+	else if( WG015_RTC_REG(DFU_DBLTAP_REG) == DFU_DBLTAP_MAGIC )
+	{
+		WG015_RTC_REG(DFU_DBLTAP_REG) = 0;
+		return DFU_FLAG_STAY;
+	}
+	// Arm the window; if a second reset lands inside it the magic survives.
+	WG015_RTC_REG(DFU_DBLTAP_REG) = DFU_DBLTAP_MAGIC;
+	uint32_t t0 = WG015_rdcycle();
+	while( WG015_rdcycle() - t0 < DFU_DBLTAP_MS * DFU_CYCLES_PER_MS );
+	WG015_RTC_REG(DFU_DBLTAP_REG) = 0;
+#endif
+	return 0;
 }
 
 // Reboot into the app through a full system reset: DPU drops, the host
