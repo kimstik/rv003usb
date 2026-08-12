@@ -82,6 +82,7 @@ SECTIONS
 
 	/* Stack: top of TCM-B, growing down. */
 	PROVIDE(__stack_top = ORIGIN(TCMB) + LENGTH(TCMB));
+	PROVIDE(end = __bss_end); /* newlib _sbrk heap base (unused, links only) */
 	ASSERT(__bss_end + STACK_SIZE <= ORIGIN(TCMB) + LENGTH(TCMB),
 	       "TCM-B overflow: .data+.bss+stack exceed 128K")
 
