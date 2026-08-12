@@ -162,5 +162,4 @@ SECTIONS
 	PROVIDE( _eusrstack = ORIGIN(RAM) + LENGTH(RAM));	
 }
 
-
-
+ASSERT( SIZEOF(.data) == 0, "V003 loader must have an empty .data: TINY_BOOT cannot initialize it" )
