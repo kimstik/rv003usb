@@ -17,7 +17,11 @@
 
 // bwPollTimeout, ms: erase(page start)+program vs program-only.  Real times
 // are measured on silicon (TODO.md 14); these are safe-side estimates.
-#define DFU_POLL_ERASE_MS 50
+// Erase/program times are NOT in the manual (research_flash.md GAP 6) and are
+// measured on silicon (TODO 14).  Until then bwPollTimeout is generous: the
+// HID loader's CLI waits 250 ms for a page erase, so 200 ms here is the same
+// order.  Too long only costs throughput; too short breaks the transfer.
+#define DFU_POLL_ERASE_MS 200
 #define DFU_POLL_PROG_MS  8
 
 // One-shot boot flag values (contract shared with the blob loader and the
@@ -37,15 +41,38 @@ static inline void dfu_port_irq_enable( void )
 	asm volatile( "csrs mstatus, %0" : : "r"(WG015_MSTATUS_MIE) );
 }
 
-// One-shot flag: read RTC_REG[0], clear it, honor only after a soft reset
-// (a stale flag must not redirect a cold power-on — PLAN boot-6).
+// Double-tap reset entry (Adafruit/samd11 idiom, also used by wch-uf2): a
+// second reset inside the window leaves the magic in place -> stay in the
+// loader.  Costs every normal boot DFU_DBLTAP_MS of delay; set 0 to disable.
+#define DFU_DBLTAP_MS    500
+#define DFU_DBLTAP_MAGIC 0xF02669EFu // samd11's value; any non-trivial word
+#define DFU_DBLTAP_REG   1           // RTC_REG[1]; [0] is the boot flag
+
+// Entry flag: RTC_REG[0] one-shot, honored only after a soft reset (a stale
+// flag must not redirect a cold power-on - PLAN boot-6), then double-tap.
 static inline uint32_t dfu_port_flag_read_and_clear( void )
 {
 	uint32_t flag = WG015_RTC_REG(0);
 	if( flag ) WG015_RTC_REG(0) = 0;
 	if( !( RCU->RSTSTAT & RCU_RSTSTAT_SYSRST ) )
 		flag = 0;
-	return flag;
+	if( flag ) return flag; // explicit request wins, no tap window
+
+#if DFU_DBLTAP_MS
+	if( RCU->RSTSTAT & RCU_RSTSTAT_POR )
+		WG015_RTC_REG(DFU_DBLTAP_REG) = 0; // power-up is never a "tap"
+	else if( WG015_RTC_REG(DFU_DBLTAP_REG) == DFU_DBLTAP_MAGIC )
+	{
+		WG015_RTC_REG(DFU_DBLTAP_REG) = 0;
+		return DFU_FLAG_STAY;
+	}
+	// Arm the window; if a second reset lands inside it the magic survives.
+	WG015_RTC_REG(DFU_DBLTAP_REG) = DFU_DBLTAP_MAGIC;
+	uint32_t t0 = WG015_rdcycle();
+	while( WG015_rdcycle() - t0 < DFU_DBLTAP_MS * DFU_CYCLES_PER_MS );
+	WG015_RTC_REG(DFU_DBLTAP_REG) = 0;
+#endif
+	return 0;
 }
 
 // Reboot into the app through a full system reset: DPU drops, the host
@@ -74,18 +101,12 @@ static inline void __attribute__((noreturn)) dfu_port_jump_app( void )
 // Flash controller timebase -> 48 MHz, once per loader run.  Reset defaults
 // assume ~100 MHz clk (research_flash.md §1); registers are write-locked
 // while BUSY (never busy this early, the check is free).
+// Single source of truth lives in the shim (WG015_FlashTimebase48MHz); the
+// HID loader calls the same inline.  Host-side blobs keep their own copy by
+// necessity (they are position-independent code uploaded into RAM).
 static inline void dfu_port_flash_timebase_init( void )
 {
-	if( !( WG015_FLASH->STAT & FLASH_STAT_BUSY ) )
-	{
-		WG015_FLASH->TACCR  = 1;       // ceil(48 MHz * 20 ns)
-		WG015_FLASH->TNVSR  = 240000;  // 5 ms
-		WG015_FLASH->TERSR  = 4800000; // 100 ms (erase timebase)
-		WG015_FLASH->TNVHR  = 240;     // 5 us
-		WG015_FLASH->TNVH1R = 4800;    // 100 us
-		WG015_FLASH->TRCVR  = 480;     // 10 us
-		WG015_FLASH->TPGSR  = 480;     // 10 us
-	}
+	WG015_FlashTimebase48MHz();
 }
 
 // ---- RAM-resident flash write ----------------------------------------------

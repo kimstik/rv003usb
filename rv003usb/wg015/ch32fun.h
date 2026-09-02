@@ -166,6 +166,24 @@ static inline void Delay_Ms( uint32_t ms )
 	(port)->INTENSET   = (pinmask); \
 } while(0)
 
+/* Flash controller timebase -> 48 MHz.  Reset defaults assume ~100 MHz clk
+ * (research_flash.md S1); the registers are write-locked while BUSY, so the
+ * guard is free.  Single source of truth for both loaders (the HID loader's
+ * host-side blobs necessarily carry their own PIC copy). */
+static inline void WG015_FlashTimebase48MHz( void )
+{
+	if( !( WG015_FLASH->STAT & FLASH_STAT_BUSY ) )
+	{
+		WG015_FLASH->TACCR  = 1;       /* ceil(48 MHz * 20 ns) */
+		WG015_FLASH->TNVSR  = 240000;  /* 5 ms   */
+		WG015_FLASH->TERSR  = 4800000; /* 100 ms */
+		WG015_FLASH->TNVHR  = 240;     /* 5 us   */
+		WG015_FLASH->TNVH1R = 4800;    /* 100 us */
+		WG015_FLASH->TRCVR  = 480;     /* 10 us  */
+		WG015_FLASH->TPGSR  = 480;     /* 10 us  */
+	}
+}
+
 /* Seam #4 (REBOOT_TO_BOOTLOADER, PLAN Р3/Р8): boot-flag contract with the
  * bootloader. One-shot: the loader reads RTC_REG[0], clears it immediately,
  * and honors it only when RCU->RSTSTAT reports SYSRST (not POR). Values are

@@ -149,16 +149,7 @@ int main( void )
 	// ---- Flash controller timebase -> 48 MHz, once per loader run (Р8) --
 	// Reset defaults assume a ~100 MHz clk (research_flash.md §1); registers
 	// are write-locked while BUSY (never busy this early, check is free).
-	if( !( WG015_FLASH->STAT & FLASH_STAT_BUSY ) )
-	{
-		WG015_FLASH->TACCR  = 1;       // ceil(48 MHz * 20 ns)
-		WG015_FLASH->TNVSR  = 240000;  // 5 ms
-		WG015_FLASH->TERSR  = 4800000; // 100 ms (erase timebase)
-		WG015_FLASH->TNVHR  = 240;     // 5 us
-		WG015_FLASH->TNVH1R = 4800;    // 100 us
-		WG015_FLASH->TRCVR  = 480;     // 10 us
-		WG015_FLASH->TPGSR  = 480;     // 10 us
-	}
+	WG015_FlashTimebase48MHz(); // shared inline (shim) - one source of truth
 
 	runwordpad = 0; // absolute-address symbol: startup does not zero it
 
