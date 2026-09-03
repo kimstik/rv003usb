@@ -25,11 +25,14 @@ code:
 	lw	t1, 8(a0)           /* dest */
 	lw	t2, 12(a0)          /* unit count */
 	lw	t3, 16(a0)          /* unit size */
-	li	t4, 16              /* unit must be 16 or 64 */
-	beq	t3, t4, unit_ok
-	li	t4, 64
+	/* Unit MUST be 16 (РП/SVD: DATA[0..3] = 128-bit program unit).
+	   The SDK driver loops 16 words instead, which would spill past DATA3
+	   into TACCR..TPGSR (+0x1C..0x34) and start the program pulse with
+	   payload bytes as flash timings - a silent cell-stress bug.  The 64 B
+	   variant stays rejected until the R6 experiment proves a safe form
+	   on silicon (TODO 14). */
+	li	t4, 16
 	bne	t3, t4, badparam
-unit_ok:
 	beqz	t2, badparam
 	mul	t4, t2, t3          /* total bytes */
 	li	t5, 832             /* data area 0x120..0x460 of the scratchpad */

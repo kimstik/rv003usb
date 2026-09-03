@@ -370,7 +370,10 @@ int main( int argc, char **argv )
 	{
 		if( ai+1 >= argc ) { usage(); return 1; }
 		opt_unit = atoi( argv[ai+1] );
-		if( opt_unit != 16 && opt_unit != 64 ) { fprintf( stderr, "-u must be 16 or 64\n" ); return 1; }
+		// R6 is unresolved: with unit 64 the device blob would write past
+		// FLASH->DATA3 into the timebase registers before issuing CMD=WR.
+		// Rejected here as well as device-side until measured on silicon.
+		if( opt_unit != 16 ) { fprintf( stderr, "-u: only 16 is supported (64 unverified, see TODO R6)\n" ); return 1; }
 		ai += 2;
 	}
 	if( ai >= argc ) { usage(); return 1; }
