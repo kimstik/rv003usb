@@ -162,5 +162,7 @@ SECTIONS
 	PROVIDE( _eusrstack = ORIGIN(RAM) + LENGTH(RAM));	
 }
 
-
-
+/* TINY_BOOT (rv003usb.S) neither copies nor preserves .data - it zeroes all
+   RAM. Any initialized RAM object would silently read back as zeros, so the
+   build must have none. Guard it at link time. */
+ASSERT( SIZEOF(.data) == 0, "V003 loader must have an empty .data: TINY_BOOT cannot initialize it" )

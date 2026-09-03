@@ -36,7 +36,12 @@
 // All descriptor payloads carry section(".rodata.usbdesc"): the WG015 linker
 // scripts fold that into .data -> TCM-B, because descriptor bytes are read
 // from inside the cycle-counted TX loop (PLAN Р3: clocked-path data in RAM).
-#define USBDESC __attribute__((aligned(4))) /* V003: descriptors stay in flash - stack reads rodata XIP as upstream */
+#define USBDESC __attribute__((section(".rodata"), aligned(4)))
+/* MUST be explicit on V003: a struct with a flexible array member otherwise
+   lands in .data, which TINY_BOOT never copies (and zeroes) - the descriptors
+   would read back as zeros and enumeration would die.  Upstream uses the same
+   idiom (bootloader/usb_config.h:129).  Also: never build this target with
+   -msmall-data-limit>8, it moves const objects into .data for the same reason. */
 
 static const uint8_t device_descriptor[] USBDESC = {
 	18, //Length

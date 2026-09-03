@@ -31,8 +31,13 @@ ARCHFLAGS := -march=rv32imc_zicsr -mabi=ilp32
 # Target select must come from the command line, not only the shim header:
 # usb_config.h is included BEFORE ch32fun.h in rv003usb.c (line 7 vs 10).
 CFLAGS  += -DWG015=1
+# libc: picolibc when the toolchain has it (Ubuntu gcc-riscv64-unknown-elf),
+# newlib-nano otherwise (xpack riscv-none-elf-gcc).  Both only supply headers
+# and printf plumbing; startup is ours (-nostartfiles).
+LIBC_SPECS ?= $(shell $(CC) --specs=picolibc.specs -E - </dev/null >/dev/null 2>&1 \
+	&& echo --specs=picolibc.specs || echo --specs=nano.specs)
 CFLAGS  += -Os -g -Wall $(ARCHFLAGS) \
-	--specs=picolibc.specs -nostartfiles -static -ffreestanding -fno-lto \
+	$(LIBC_SPECS) -nostartfiles -static -ffreestanding -fno-lto \
 	-ffunction-sections -fdata-sections
 
 # Include order matters: this directory FIRST so the shim ch32fun.h wins

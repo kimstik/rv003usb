@@ -7,12 +7,10 @@
 // write touching ONLY the D+/D- bits - exact BSHR-absolute semantics, DPU on
 // the same port is never clobbered. So BSHR_OFFSET is simply remapped and the
 // whole TX engine (s1 = absolute pair state, t1 = flip word) is unchanged.
+// GPIO_OUTENSET/OUTENCLR/INTSTATUS_OFFSET and PLIC_MICC_ADDR come from
+// K1921VG015_min.h (via the ch32fun shim) - one source of truth for addresses.
 #define INDR_OFFSET 0
 #define BSHR_OFFSET (0x400 + (USB_DMASK<<2))
-#define GPIO_OUTENSET_OFFSET  0x2C
-#define GPIO_OUTENCLR_OFFSET  0x30
-#define GPIO_INTSTATUS_OFFSET 0x80
-#define PLIC_MICC 0x0C200004
 #else
 #define CFGLR_OFFSET 0
 #define INDR_OFFSET 8
@@ -114,6 +112,11 @@ EXTI7_0_IRQHandler:
 
 #if defined (RV003_ADD_EXTI_MASK) && defined (RV003_ADD_EXTI_HANDLER)
 #if defined(WG015) && WG015
+// LIMITATION (WG015): PLIC line 5 is shared by GPIO ports A, B and C, but this
+// path only inspects and W1C-clears the USB port's INTSTATUS.  A user IRQ pin
+// on ANOTHER port would never get its flag cleared and the edge-sensitive
+// gateway would re-raise forever.  User GPIO interrupts must therefore live on
+// the same port as D+/D- (see doc/wg015/TODO.md).
 	lw a2, GPIO_INTSTATUS_OFFSET(a5) // pending pin flags of the shared PLIC line
 	c.andi a2, USB_DMASK
 	c.beqz a2, another_interrupt_check
@@ -633,7 +636,7 @@ interrupt_complete:
 	li a0, (1<<USB_PIN_DM)
 #endif
 	sw a0, GPIO_INTSTATUS_OFFSET(a5)
-	la a5, PLIC_MICC
+	la a5, PLIC_MICC_ADDR
 	lw a0, 0(a5)  // claim: returns source id, clears pending
 	sw a0, 0(a5)  // complete: gateway re-arms for the next edge
 #else
@@ -806,8 +809,14 @@ handle_se0_keepalive:
 // SEND DATA /////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////
 
+// Back to the time-critical section: the TX engine is bit-banged too, so it
+// must live wherever the RX ISR lives (V00x: RAM; WG015: .timecrit, which the
+// linker puts in flash or TCM-A).  Without this the TCM fallback would leave
+// every TX cell fetching from flash - exactly what it exists to avoid.
 #if defined(CH32V00x) && CH32V00x
 .section .srodata, "ax"
+#elif defined(WG015) && WG015
+.section .timecrit, "ax"
 #endif
 
 .balign 4

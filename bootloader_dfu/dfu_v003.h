@@ -70,7 +70,14 @@ static inline void __attribute__((noreturn)) dfu_port_jump_app( void )
 	dfu_port_reboot_to_app();
 }
 
-static inline void dfu_port_flash_timebase_init( void ) { } // none on V003
+// No flash timebase on V003 - but SysTick is OUR job here: TINY_BOOT only sets
+// the PLL, and the HID loader does the same thing explicitly (bootloader.c:121).
+// Without this dfu_port_cycles() returns a frozen 0 and every wait loop in the
+// core spins forever.
+static inline void dfu_port_flash_timebase_init( void )
+{
+	SysTick->CTLR = 5; // enable, HCLK source (FUNCONF_SYSTICK_USE_HCLK)
+}
 
 // 64-byte fast page: erase + program, XIP (core stalls while BSY — fine,
 // we are inside the host's bwPollTimeout window and IRQs are masked).

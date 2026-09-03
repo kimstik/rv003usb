@@ -61,6 +61,11 @@ static int       dfu_rx_ready( uint32_t len ); // capture complete?
 // no .data copy (rv003usb.S:1058), and everything but bState is 0 anyway.
 static uint8_t dfu_status[8] __attribute__((aligned(4)));
 
+#if DFU_ENABLE_UPLOAD
+// UPLOAD staging buffer (see the UPLOAD case: no flash pointers in the TX path)
+static uint8_t dfu_upload_buf[DFU_XFER_SIZE] __attribute__((aligned(4)));
+#endif
+
 // Deferred-op state, ISR (class request) -> main loop.
 static volatile uint32_t dfu_addr;        // pending block flash address
 static volatile uint32_t pending_len;     // pending block byte count
@@ -158,13 +163,19 @@ static int dfu_class_request( uint32_t req, uint32_t wValue, uint32_t wLength,
 		return DFU_ACT_ACK;
 
 #if DFU_ENABLE_UPLOAD
-	case 0x02A1: // DFU_UPLOAD — direct flash read (legal outside flash ops)
+	case 0x02A1: // DFU_UPLOAD — read back through RAM
 	{
 		uint32_t addr = DFU_APP_BASE + wValue * DFU_XFER_SIZE;
 		uint32_t len = ( wLength < DFU_XFER_SIZE ) ? wLength : DFU_XFER_SIZE;
 		if( addr >= DFU_FLASH_END ) len = 0;         // past end: short/ZLP
 		else if( addr + len > DFU_FLASH_END ) len = DFU_FLASH_END - addr;
-		*reply = (const uint8_t *)addr;
+		// Stage into RAM first: the transport's TX loop reads the reply byte
+		// by byte from INSIDE a cycle-counted bit cell, and a flash D-read has
+		// variable latency there (PLAN Р3; the WG015 erratum 5 workaround is
+		// evidence the same hazard is real for data loads).
+		for( uint32_t i = 0; i < len; i++ )
+			dfu_upload_buf[i] = ((const uint8_t *)addr)[i];
+		*reply = dfu_upload_buf;
 		*replen = len;
 		return DFU_ACT_REPLY;
 	}
