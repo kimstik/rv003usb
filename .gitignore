@@ -6,3 +6,5 @@
 bench.bin
 demo_*.bin
 bootloader.bin
+bootloader_wg015/blobs/*.bin
+bootloader_wg015/blobs/blobs.h
