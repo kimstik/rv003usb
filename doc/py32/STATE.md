@@ -3,23 +3,34 @@
 Mirrors doc/wg015/STATE.md: what is done, what is in flight, what is next.
 Kept current so a session that dies mid-run can be resumed from this file alone.
 
-Last updated: 2026-09-04. Three of four fragments complete; §9 waves 2-4 in flight.
+Last updated: 2026-09-04. All four fragments complete and spliced into PLAN.md.
 
 ## Where the plan stands
 
-`PLAN.md` (1194 lines) is the v2 document. It is **superseded in four places** by
-fragments in `rework/`, which have not yet been spliced into it. Read the
-fragments as authoritative where they overlap PLAN.md.
+`PLAN.md` (2675 lines) is the single authoritative document. The four rework
+fragments have been **spliced into it** (the splice half of task T0); read
+PLAN.md, not the fragments. `rework/` is kept unedited as the provenance record —
+where each block came from, and what it looked like before its cross-references
+were retargeted.
 
-| fragment | replaces | state |
-|---|---|---|
-| `rework/ledger.md` (491 l) | §2.1, §2.5, App A, App B, + new bench-gate §5 | complete |
-| `rework/risks_verdict.md` (234 l) | §0, §10, §12, + new §10A bring-up gates G0-G12 | complete |
-| `rework/target_clock.md` (472 l) | §3.1, §3.2, §6, §11 | complete |
-| `rework/tasks_waves.md` (531 l) | §9 | Waves 2-4 prose, defect map, ledger requests outstanding |
+| fragment | landed in PLAN.md as |
+|---|---|
+| `rework/ledger.md` (491 l) | new §2.0 (the cost model, cited by the other blocks as their "§0"), §2.1, the cycle-cost annotations of §2.5, Appendix A, Appendix B, Appendix D (the fragment's own "§5" — renamed, because that number is taken by §5 Gaps versus WG015) |
+| `rework/risks_verdict.md` (234 l) | §0, §10, new §10A bring-up gates G0-G12, §12 |
+| `rework/target_clock.md` (472 l) | §3.1, §3.2, §6, §11 |
+| `rework/tasks_waves.md` (1141 l) | §9 in full, including §9.0-§9.6 |
 
-**Splice not yet done.** Each block is headed `## REPLACES §N — …` so the merge
-is mechanical. Task T0 in `rework/tasks_waves.md` owns it.
+**Splice done.** All 12 `## REPLACES` blocks, both `## NEW` blocks and ledger's
+§0 landed; every substantive line of all 15 blocks was checked present in
+PLAN.md. Two things deliberately did **not** come across: the fragments' own
+preambles (splice scaffolding), and ledger's closing "Requests to owners of
+sections I do not own" — process residue, dispositioned item by item in §9.6.
+Section numbering did not shift: §2.0, §10A and Appendix D are suffixed
+additions, so existing citations into §1-§8 and Appendices A-C still resolve.
+Cross-references were retargeted: shorthand for material now inside PLAN.md
+(`LG §`, `RV R`/`RV G`, `TC §`) points at PLAN section numbers; shorthand for
+documents that stay standalone (`BF §`, `CF §`, `XF`, `DV D-`) now names the
+file. Recorded in PLAN.md §12 item 67.
 
 ## What the rework changes, in one place
 
@@ -37,8 +48,8 @@ is mechanical. Task T0 in `rework/tasks_waves.md` owns it.
 
 An earlier pass read one column of that table as if it were the whole thing and
 concluded RAM was expensive. It was not, and the conclusion would have reversed
-a correct decision. The rule that came out of it is recorded in
-`rework/risks_verdict.md`: do not adopt an overturn of someone else's
+a correct decision. The rule that came out of it is now PLAN.md
+§10.3: do not adopt an overturn of someone else's
 engineering decision until the whole source behind it has been re-read.
 
 ## Facts established by building, not by reading
@@ -96,12 +107,16 @@ engineering decision until the whole source behind it has been re-read.
 
 ## Next steps, in order
 
-1. Finish `rework/tasks_waves.md` Waves 2-4, the defect map, and the requests
-   `rework/ledger.md` addresses to §9. (target_clock.md is done.)
-2. **Splice** the four fragments into `PLAN.md` (task T0).
-3. Review the spliced plan — the three critics (executability, technical,
-   completeness) have never cleared a post-correction version.
-4. Run the implementer fleet over §9's waves with disjoint file ownership.
+1. Review the spliced plan — the three critics (executability, technical,
+   completeness) have never cleared a post-correction version. This is the first
+   version they can be run against, since PLAN.md is now self-contained.
+2. Run the rest of T0 (§9.4 Wave 0): the branch, the merge of master 80b1893, the
+   cherry-pick of the PY32 branch and the removal of the vendor scaffolding. Only
+   the splice half of T0 is done; that half is not started.
+3. Run the implementer fleet over §9's waves with disjoint file ownership
+   (§9.2's matrix, §9.3's edges).
+4. On silicon, run §10A's gates in order — G1 first, since no pad constant in
+   Appendix A/B is final before it (Appendix D carries the kernels).
 
 ## Process note that has earned its place
 

@@ -482,3 +482,22 @@ assertion names an engine symbol, so the linker script and the engine become
 coupled — renaming the ISR entry breaks the link with an assertion failure
 rather than a missing symbol. That is the desirable direction of failure, but it
 should be a deliberate choice recorded next to the assertion, not a surprise.
+
+### Postscript: the plan's own guard is stronger than the one tested above
+
+After this section was written, the spliced PLAN.md §9 T1 turned out to specify
+a **three-layer** guard, arrived at independently: `ASSERT(SIZEOF(.timecrit) > 0)`
+— which it names outright as "the D-5 killer" — plus the VMA range assertion,
+plus `-Wl,--orphan-handling=error`. That is the same hole this section found,
+closed the same way, by a different route.
+
+`--orphan-handling=error` was tested here too and does reject the orphan case.
+Note what it costs, which PLAN.md §9 T1 already anticipates: it also errors on
+`.glue_7`, `.glue_7t` and `.vfp11_veneer` from the linker's own stubs, so every
+such section must be explicitly placed or discarded in the script or the build
+will not link at all.
+
+The summary statements in PLAN.md §10A, §9.5 and §12 item 64 originally
+described the mitigation as "an `ASSERT` on its VMA", which understates it;
+they were corrected to name all three layers and to record that a VMA assertion
+alone passes vacuously.
