@@ -418,3 +418,67 @@ The outcome is not cosmetic. If F003 has no PLL, the target flip still stands on
 F030 but F003 joins F002B on the self-calibration track, and the "primary family
 needs no servo" claim has to be narrowed to F030 alone. The plan should carry
 both branches rather than assume the favourable one.
+
+## 12. The RAM-placement guard — built and tested, including the version that does not work
+
+§4 and §10 identify the port's most dangerous latent defect: `.datacode` reaches
+RAM only because it is swallowed by a `*(.data*)` wildcard, and a linker script
+spelling that rule with a dot would put the RX engine in flash with no
+diagnostic. The plan's mitigation is a build-time assertion. That mitigation was
+worth testing before an implementer builds on it, because **the obvious form of
+it is defective**.
+
+All results below are from linking the real engine object against purpose-built
+scripts with `arm-none-eabi-gcc 13.2.1`.
+
+### The hazard, reproduced
+
+A script with `.data : { *(.data) *(.data.*) }` — the dotted form — and no
+`.datacode` rule places `EXTI2_3_IRQHandler` at **0x08000200**, in flash. The
+link succeeds. No error, no warning. Every cycle figure in the ledger is then
+wrong, and nothing says so. This is no longer a predicted failure; it is a
+reproduced one.
+
+### The obvious guard, and why it passes when it should fail
+
+The natural assertion bounds the section:
+
+```
+.ramcode : ALIGN(4) { __ramcode_start = .; *(.datacode) __ramcode_end = .; } > RAM AT> FLASH
+ASSERT(__ramcode_start >= ORIGIN(RAM) && __ramcode_end <= ORIGIN(RAM) + LENGTH(RAM), "...")
+```
+
+It catches a section deliberately routed to flash. It does **not** catch the more
+likely mistake: if the input-section name is ever changed or mistyped — say the
+rule collects `*(.ramtext)` while the engine still emits `.datacode` — the
+output section is empty, `__ramcode_start == __ramcode_end`, both are nominally
+inside RAM, **the assertion passes**, and the engine lands in flash at
+0x08000200 exactly as before. Verified: the build succeeds and the symbol is in
+flash.
+
+An emptiness check plus a symbol anchored in the engine itself closes both:
+
+```
+ASSERT(__ramcode_end > __ramcode_start,
+       "FATAL: RAM-code section is EMPTY - input name mismatch")
+ASSERT(EXTI2_3_IRQHandler >= ORIGIN(RAM) && EXTI2_3_IRQHandler < ORIGIN(RAM) + LENGTH(RAM),
+       "FATAL: the RX engine is not in RAM - timing model invalid")
+```
+
+Tested against three scripts:
+
+| script | result |
+|---|---|
+| correct rule, routed `> RAM AT> FLASH` | builds; `EXTI2_3_IRQHandler` at 0x20000000 |
+| rule collects the wrong input name (section empty) | **rejected** — "RAM-code section is EMPTY" |
+| correct rule, routed `> FLASH` | **rejected** — "the RX engine is not in RAM" |
+
+The lesson generalises past this one guard: assert on a **symbol the timed code
+actually defines**, not on the bounds of a section that may not have collected
+anything. A guard that can be satisfied vacuously is not a guard.
+
+One caveat worth stating rather than discovering later: the symbol-anchored
+assertion names an engine symbol, so the linker script and the engine become
+coupled — renaming the ISR entry breaks the link with an assertion failure
+rather than a missing symbol. That is the desirable direction of failure, but it
+should be a deliberate choice recorded next to the assertion, not a surprise.
