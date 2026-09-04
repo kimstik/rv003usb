@@ -3,7 +3,7 @@
 Mirrors doc/wg015/STATE.md: what is done, what is in flight, what is next.
 Kept current so a session that dies mid-run can be resumed from this file alone.
 
-Last updated: 2026-09-04, after the second salvage.
+Last updated: 2026-09-04. Three of four fragments complete; §9 waves 2-4 in flight.
 
 ## Where the plan stands
 
@@ -15,7 +15,7 @@ fragments as authoritative where they overlap PLAN.md.
 |---|---|---|
 | `rework/ledger.md` (491 l) | §2.1, §2.5, App A, App B, + new bench-gate §5 | complete |
 | `rework/risks_verdict.md` (234 l) | §0, §10, §12, + new §10A bring-up gates G0-G12 | complete |
-| `rework/target_clock.md` (379 l) | §3.1, §3.2, §6, §11 | §11 outstanding |
+| `rework/target_clock.md` (472 l) | §3.1, §3.2, §6, §11 | complete |
 | `rework/tasks_waves.md` (531 l) | §9 | Waves 2-4 prose, defect map, ledger requests outstanding |
 
 **Splice not yet done.** Each block is headed `## REPLACES §N — …` so the merge
@@ -64,6 +64,22 @@ engineering decision until the whole source behind it has been re-read.
 * `py32f0-template` is an empty submodule, so the branch cannot link as
   published. Upstream pins cleanly at 289ffc8. Open: vendor the few files needed
   or carry the submodule.
+* **The branch builds, for all three candidate parts** once the template is
+  supplied: F030x8 (RAM 2128/8K, flash 2908/64K), F003x4 (RAM 1616/2K =
+  **78.91 %**, flash 2132/16K), F002Bx5 (RAM 1168/3K, flash 2696/24K). The
+  placement split is confirmed in the linked image: `EXTI2_3_IRQHandler`
+  0x200000c8, `usb_send_data` 0x0800022c.
+* Build-system defects found by being bitten: objects land **outside** `Build/`
+  and carry no `MCU_TYPE`, so `rm -rf Build` does not clean and a part switch
+  silently relinks another part's objects — this produced a false "F030 does not
+  build" during this work. And an F003 build takes neither arm of the demo's
+  clock `#if`, linking a healthy-looking image that never reaches 48 MHz.
+* **Open and consequential**: `RCC_PLL_SUPPORT` is defined only for F030, so the
+  vendor library compiles no PLL path for F003 — against Xiamatsu's measured
+  claim that the PLL locks on F003. F003's `RCC` struct has a reserved word at
+  0x0C exactly where F030 has `PLLCFGR`, which raises the prior but does not
+  settle it (F002B has the same hole and its PLL is reportedly absent). If F003
+  has no PLL, "the primary family needs no servo" narrows to F030 alone.
 
 `DEFECTS_VERIFIED.md` — defects located in source, with two claims re-shaped:
 
@@ -80,7 +96,8 @@ engineering decision until the whole source behind it has been re-read.
 
 ## Next steps, in order
 
-1. Finish `rework/target_clock.md` §11 and `rework/tasks_waves.md` Waves 2-4.
+1. Finish `rework/tasks_waves.md` Waves 2-4, the defect map, and the requests
+   `rework/ledger.md` addresses to §9. (target_clock.md is done.)
 2. **Splice** the four fragments into `PLAN.md` (task T0).
 3. Review the spliced plan — the three critics (executability, technical,
    completeness) have never cleared a post-correction version.
