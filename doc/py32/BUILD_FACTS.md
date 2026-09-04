@@ -242,3 +242,125 @@ The open item that remains is narrower than before: not "what do the variants
 differ over" (answered: padding) but "are F002B's pad counts still right, and
 are F003/F030's, under the corrected cost model" — which is ledger and bench
 work, not archaeology.
+
+## 9. The branch builds end to end — for all three candidate parts
+
+With `py32f0-template` supplied at its pinned commit (§6), `demo_gamepad` builds
+to a linked image for every part the port cares about. From a genuinely clean
+tree (see the warning in §10 — this matters):
+
+| MCU_TYPE | RAM used | RAM total | flash used | flash total | RAM % |
+|---|---|---|---|---|---|
+| PY32F030x8 | 2128 B | 8K | 2908 B | 64K | 25.98 % |
+| PY32F003x4 | 1616 B | 2K | 2132 B | 16K | **78.91 %** |
+| PY32F002Bx5 | 1168 B | 3K | 2696 B | 24K | 38.02 % |
+
+So there is a working static baseline for the implementer fleet: not a plan to
+build, an image that links today.
+
+**The RAM budget question is answered with a number.** On the smallest member of
+the newly-primary family, F003x4, the demo already occupies 78.91 % of 2K,
+leaving about 432 B. That is the figure the plan should carry rather than an
+assumption that 2K "should be enough". It includes a 192 B RAM vector table
+(`.ram_vector` at 0x20000000) and a 1028 B heap/stack reservation, both of which
+are tunable — but it also does not yet include anything the port adds.
+
+### The placement split, confirmed in a real link
+
+Symbol addresses from the linked `demo_gamepad.elf` (F003x4), not from a
+synthetic object:
+
+```
+200000c8 T EXTI2_3_IRQHandler      <- RAM
+200000e6 t preamble_loop           <- RAM
+20000142 t bit_process             <- RAM
+2000023c b rxbuf                   <- RAM
+0800022c T usb_send_data           <- FLASH
+```
+
+This settles §3 and §4 in the strongest available form: the RX engine really does
+execute from RAM in a fully linked image, and the TX engine really does execute
+from flash.
+
+## 10. Two build-system defects found by being bitten by them
+
+### 10.1 Objects escape the build directory and are not keyed by part
+
+`rules.mk` maps a source at `$(TOP)/<path>.c` to `$(BDIR)/<path>.o`, and since
+sources are reached through `../`, the objects land *outside* `Build/`:
+
+```
+demo_gamepad/rv003usb/rv003usb-arm.o
+demo_gamepad/py32f0-template/Libraries/CMSIS/.../startup_py32f003.o
+demo_gamepad/py32f0-template/Libraries/PY32F0xx_LL_Driver/Src/*.o
+```
+
+Two consequences, both real:
+* `rm -rf Build` does **not** clean the tree. Most of the objects survive it.
+* Object paths carry no `MCU_TYPE`, so changing part silently reuses objects
+  compiled with a different `-D<PART>` and a different device header.
+
+This is not theoretical. It produced a wrong result during this very
+investigation: after building F003x4, an `rm -rf Build` and a rebuild as
+PY32F030x8 failed to link with `undefined reference to BSP_RCC_HSE_PLLConfig`,
+and the obvious reading — "F030 does not build" — was **wrong**. The F003-compiled
+BSP objects had been reused, and F003 does not compile that function (§10.2).
+From a properly clean tree F030x8 builds fine. Any conclusion drawn from a
+part-to-part rebuild on this build system is untrustworthy unless the tree was
+cleaned with `find . -name '*.o' -delete` first.
+
+The port's own build must key object paths by part, or the build matrix (D-3)
+will produce confident nonsense.
+
+### 10.2 `RCC_PLL_SUPPORT` is defined only for F030 — and this touches the flip
+
+In the vendor CMSIS headers from the pinned template:
+
+| part | `RCC_PLL_SUPPORT` |
+|---|---|
+| py32f030x6, py32f030x8 | **defined** |
+| py32f003x4, x6, x8 | not defined |
+| py32f002ax5, py32f002bx5 | not defined |
+
+`BSP_RCC_HSI_PLL48MConfig()` — which is exactly the HSI 24 MHz x PLL2 = 48 MHz
+path the target flip depends on, and which sets
+`LL_RCC_HSI_SetCalibFreq(LL_RCC_HSICALIBRATION_24MHz)` then
+`LL_PLL_ConfigSystemClock_HSI()` — lives inside `#if defined(RCC_PLL_SUPPORT)`
+(`py32f0xx_bsp_clock.c:57-89`). **For F003 the vendor library will not compile a
+PLL path at all.**
+
+This directly contradicts the measured claim in `CHIP_FACTS_XIAMATSU.md` §2,
+which cites «Проверено — PLL запускается на 48 МГц на чипах PY32F002A и
+PY32F003» (xm_030.md:336). One of the two is wrong about F003, and the
+disagreement is not resolvable from documents:
+
+* If the measurement is right, the vendor header is conservative (plausible —
+  these parts are widely believed to be one die with different markings), and
+  the port must bring the PLL up **against registers directly**, because the LL
+  library will not do it for F003.
+* If the header is right, the flip's primary path is **F030 only**, and F003 is
+  in the same boat as F002B.
+
+Either way the plan must not assume it gets an F003 PLL from the vendor library.
+This belongs in the open questions with a specific bench measurement: on an F003
+part, write the PLL registers by hand and measure the resulting clock.
+
+### 10.3 An F003 build silently configures no clock at all
+
+`demo_gamepad.c:15-23` sets the clock only for two parts:
+
+```
+#if PY32F002Bx5
+	BSP_RCC_HSI_48MConfig();
+#elif PY32F030x8
+	BSP_RCC_HSE_PLLConfig();
+#endif
+```
+
+An F003 build takes neither arm. It compiles, links, and reports a healthy image
+— and runs at whatever `SystemInit()` leaves, not at 48 MHz. That is why the
+F003x4 build succeeded above while the F030x8 build was reaching for a BSP
+symbol: F003 never asks for a clock. For a bit-banged USB stack whose entire
+correctness rests on 48 MHz, a silently unclocked build is a trap worth a
+build-time guard: the port should fail to compile for any part it has no clock
+path for, rather than produce a plausible image.
