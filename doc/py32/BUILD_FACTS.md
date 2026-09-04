@@ -150,3 +150,43 @@ Open decision, not settled here: whether to vendor the handful of files we need
 (linker script, startup, a minimal device header) the way the WG015 port vendors
 `K1921VG015_min.h`, or to carry the submodule. The WG015 precedent and the
 licence question both argue for vendoring a minimal self-written header.
+
+## 7. Register map — verified against the vendor headers, both families
+
+Checked in `Libraries/CMSIS/Device/PY32F0xx/Include/{py32f030x8.h, py32f002bx5.h}`
+from the pinned template, against the constants the engine actually uses.
+
+| symbol | F030/F003 | F002B | engine uses |
+|---|---|---|---|
+| `IOPORT_BASE` | 0x50000000 | 0x50000000 | — |
+| `GPIOA_BASE` | 0x50000000 | 0x50000000 | — |
+| `GPIOB_BASE` | 0x50000400 | 0x50000400 | literal `0x50000400` in **both** `.text` and `.datacode` pools |
+| `AHBPERIPH_BASE` | 0x40020000 | 0x40020000 | — |
+| `RCC_BASE` | 0x40021000 | 0x40021000 | — |
+| `EXTI_BASE` | 0x40021800 | 0x40021800 | literal `0x40021800` in the `.text` pool |
+
+`GPIO_TypeDef` field order is byte-for-byte identical in the two headers:
+MODER 0x00, OTYPER 0x04, OSPEEDR 0x08, PUPDR 0x0C, **IDR 0x10**, ODR 0x14,
+**BSRR 0x18**, LCKR 0x1C, AFR[2] 0x20-0x24, BRR 0x28. The engine's
+`#define IDR_OFFSET 0x10` and `#define BSRR_OFFSET 0x18` (arm.S:14-15) are
+correct for both families.
+
+Two conclusions worth carrying into the plan:
+
+* **The target flip costs nothing in the engine's register layer.** Every base
+  address and every register offset the bit-bang path touches is identical
+  across F002B and F030/F003. Whatever else the flip changes — clock bring-up,
+  calibration, RAM budget — it does not change a single address in the timed
+  code. Any argument against the flip on portability grounds is unfounded.
+* GPIO sits at `IOPORT_BASE` = 0x5000_0000, i.e. on the M0+ **IOPORT** bus
+  rather than APB. That is the architectural reason behind the measured "доступ
+  к портам на полной скорости", and it is why port access stays cheap from both
+  flash-resident and RAM-resident code. This is corroboration of the measurement
+  from a second, independent source, not a restatement of it.
+
+Not checked here, and still open: whether the F002B *clock* tree exposes the
+same fields at the same offsets (it does not — the F002B HSI trim path is the
+whole reason for the flip), and whether the five `#if PY32F002Bx5` sites in the
+engine (arm.S:402, 415, 444, 490, 530) differ for register reasons or for
+timing reasons. Since the register map is identical, timing is the likelier
+explanation and someone must read those five sites and say which.
