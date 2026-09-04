@@ -190,3 +190,55 @@ whole reason for the flip), and whether the five `#if PY32F002Bx5` sites in the
 engine (arm.S:402, 415, 444, 490, 530) differ for register reasons or for
 timing reasons. Since the register map is identical, timing is the likelier
 explanation and someone must read those five sites and say which.
+
+## 8. What the five per-part `#if` sites actually do — read, not guessed
+
+§7 left open whether the `#if PY32F002Bx5` sites differ for register reasons or
+timing reasons. Reading all five (arm.S:402, 415, 444, 490, 530) settles it:
+**every one is cycle padding in the TX path. Not one touches a register, an
+address, or a bit position.**
+
+| site | F002B | F003/F030 (the `#else`) |
+|---|---|---|
+| arm.S:402 | `b .+2` + `.balign 4` | two `nop` |
+| arm.S:415 | `bcs pre_and_tok_delay_one_bit` then `mov SCRATCH, FLIP_MASK` | the two reordered, plus an assembler alignment assertion |
+| arm.S:444 | one extra `nop` | — |
+| arm.S:490 | one extra `nop` | — |
+| arm.S:530 | — | one extra `b .+2` inside `insert_stuffed_bit` |
+
+Net: F002B carries two extra `nop`, F003/F030 one extra `b .+2`, which is
+exactly the 4-byte `.text` difference measured in §2 (0x1fc vs 0x200).
+
+This is a direct corroboration of the two-column cost model: the two variants
+exist *because the same instruction sequence does not take the same number of
+cycles on the two dice*. It is the branch author having hit, empirically, the
+same thing the Xiamatsu measurements describe.
+
+### The alignment assertion in the never-selected arm — and it passes
+
+The `#else` arm at arm.S:415 carries a build-time guard that has never been
+evaluated by the branch's own build system, because `Makefile.py32` pins
+`MCU_TYPE = PY32F002Bx5`:
+
+```
+.ifeq (pre_and_tok_send_inner_loop - usb_send_data) & 2
+	.error "pre_and_tok_send_inner_loop must be unaligned"
+.endif
+```
+
+Assembling with `-DPY32F003x4=1` succeeds (§2, rc=0), so the assertion does
+**not** fire: the label really does sit at an odd halfword offset, as the code
+requires. Since `.text` is 4-byte aligned and the offset of `usb_send_data`
+within the section is fixed, the property survives linking.
+
+That is a small but real piece of good news for the target flip: the arm that
+becomes primary carries a correctness constraint its author could not test, and
+it holds. It also means the constraint is live — anyone inserting or removing a
+halfword ahead of `pre_and_tok_send_inner_loop` will now break the build rather
+than the timing, which is the desirable failure mode and worth preserving
+deliberately rather than by luck.
+
+The open item that remains is narrower than before: not "what do the variants
+differ over" (answered: padding) but "are F002B's pad counts still right, and
+are F003/F030's, under the corrected cost model" — which is ledger and bench
+work, not archaeology.
