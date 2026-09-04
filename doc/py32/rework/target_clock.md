@@ -376,4 +376,97 @@ Unchanged, no edit.
 
 ---
 
-(§11 block follows.)
+## REPLACES §11 — Open questions
+
+### 11. Open questions
+
+v2 listed OQ1-OQ14 as "could not be verified from documents." Two documents didn't exist when
+v2 was written — measurements off real chips (CHIP_FACTS_XIAMATSU.md, "CF") and a build of the
+actual port (BUILD_FACTS.md, "BF") — and between them they close several of v2's questions
+outright. What follows is only what survives that reading: clock- and cost-model questions this
+fragment's sources cannot settle, each paired with the bench that would. Non-clock questions
+(SRAM retention, EXTI latency, protocol correctness, host quirks) are not this fragment's
+territory and are handed off at the end rather than restated.
+
+**Closed by measurement on live silicon (CF) — not by argument:**
+* The instruction cost model, v2 OQ4's core question — measured directly on F002A/F003/F030,
+  Flash Latency 0, ≤24 MHz (CF §1, xm_030.md:464-493). What it does **not** close — the same
+  table at 48 MHz/`LATENCY=1`, and on F002B's die — is restated below, not reopened as OQ4.
+* Whether F002B's factory 48 MHz constant is usable, v2 OQ1 — it is not: measured 43.12 MHz
+  against the 48 MHz the word encodes, −10.2 % (CF §2, xm_002b.md:172-175, :209-210).
+* Whether **F030** reaches 48 MHz cleanly — yes: HSI 24 MHz × PLL2 = 47.98 MHz measured,
+  −0.04 % (CF §2, xm_030.md:15). **F003 is not included in this closure** — see the PLL-support
+  question below (BF §10.2), which contradicts the same measurement's F003 claim.
+* Whether running code from RAM is slower than from flash — it is not: «не замедляется, как
+  ожидалось» (CF §1, xm_030.md:481); ordinary instructions cost 1 cycle either way.
+
+**Closed by experiment in this container (BF) — not by measurement on silicon:**
+* Whether the toolchain can build the port — yes, `arm-none-eabi-gcc` 13.2.1, both per-part
+  `#if` arms assemble, rc = 0 (BF §1-2).
+* Where the engine actually executes from — RX from RAM in `.datacode` (252 B), TX from flash
+  in `.text` (512 B) (BF §3).
+* How `.datacode` reaches RAM at all — absorbed by the stock script's `*(.data*)` wildcard,
+  confirmed by linking: VMA 0x20000000 / LMA 0x08000200 (BF §4).
+* Whether the register map is portable across the families — byte-identical: GPIOB
+  0x50000400, EXTI 0x40021800, `IDR` +0x10, `BSRR` +0x18, same `GPIO_TypeDef` field order
+  (BF §7).
+* What the five `#if PY32F002Bx5` sites in the engine differ over — pure cycle padding, none
+  touches a register (BF §8).
+* Whether `demo_gamepad` builds end to end, from a clean tree, for every candidate part — yes,
+  all three link: F030x8 2128/8K RAM, 2908/64K flash; F003x4 1616/2K RAM (**78.91 %**), 2132/16K
+  flash; F002Bx5 1168/3K RAM, 2696/24K flash (BF §9).
+* Whether 2 K of RAM is enough on F003x4, the smallest member of the newly-primary family — not
+  an assumption any more: ≈432 B free after the demo, including a tunable 192 B RAM vector table
+  and a 1028 B heap/stack reservation, before this port's own additions (BF §9). What remains
+  open is only whether *this port's* footprint fits in that 432 B, a budgeting task for T1/T5,
+  not a question this section poses.
+* Whether the RX engine really executes from RAM in a fully linked image, not just a synthetic
+  one — yes: `EXTI2_3_IRQHandler` at 0x200000c8, `preamble_loop` at 0x200000e6, `bit_process` at
+  0x20000142, `rxbuf` at 0x2000023c, all RAM; `usb_send_data` at 0x0800022c, flash (BF §9).
+
+These two groups are not the same kind of evidence and do not substitute for each other: the
+first is a number read off a running chip, the second is a compiler and linker doing their job
+in a container. Neither substitutes for the bench gates below, which run on this port's own
+image, on this port's own silicon.
+
+**Genuinely open — cannot be settled from documents in hand:**
+
+| OQ | Question | Bench | Expected | A mismatch means |
+|---|---|---|---|---|
+| — | **Does F003 actually have a usable PLL at all?** The vendor CMSIS headers and the measured source flatly disagree, and this bears directly on §6 Р5's flip. `RCC_PLL_SUPPORT` is defined for `py32f030x6`/`x8` only, not for `py32f003x4/x6/x8` or either F002 part; `BSP_RCC_HSI_PLL48MConfig()` — exactly the HSI24×PLL2 path the flip depends on — lives inside `#if defined(RCC_PLL_SUPPORT)` (`py32f0xx_bsp_clock.c:57-89`), so **the vendor library will not compile a PLL path for F003 at all** (BF §10.2). CF §2 cites the opposite as a measurement: «Проверено — PLL запускается на 48 МГц на чипах PY32F002A и PY32F003» (xm_030.md:336). Entangled with a second fact: `demo_gamepad.c:15-23` configures the clock only `#if PY32F002Bx5` / `#elif PY32F030x8` — an F003 build takes neither arm, links, and runs at whatever `SystemInit()` leaves, not 48 MHz (BF §10.3) — so it is also open whether F003 at 48 MHz has ever actually been *run*, as opposed to measured by someone else's rig | On an F003 part, write the PLL registers by hand (bypass the LL library) and measure the resulting clock; MCO/PA7 tops out at ≈35 MHz (CF §3) so measure through a divider | The PLL locks at 48 MHz on F003 by direct register access, matching CF §2's claim | If it does **not** lock: the header is right, CF §2's F003 claim does not hold on this die/marking, and §6 Р5's flip loses F003 as a "primary family" member — F030 becomes the only in-scope 48 MHz-by-PLL part and F003 drops to F002B's tier (out-of-datasheet, no clean path). If it **does** lock: the port must bring the PLL up against registers directly on F003, since the vendor library never will, and R25's `PY32_OUT_OF_SPEC=1` gate needs a register-level clock init, not the BSP call §6 Р5 assumed |
+| OQ4 | Does the measured cost table — including `BL`=4 and the (unmeasured) return — hold at 47.98 MHz with `LATENCY=1`? At ≤24 MHz/`LATENCY=0` it is measured (CF §1); at the target clock it is not | `rework/ledger.md` §5 "Gate 1" = `rework/risks_verdict.md` G1: kernels K1-K11 on F030, run at 24 MHz/LAT0 (must reproduce CF §1's numbers — calibrates the rig) then at 48 MHz/LAT1; K10 fixes the staircase constant `C` | RAM-copy kernels K1-K4, K7-K11 identical between the two runs (cost is per-HCLK; a RAM-resident kernel touches no flash) | The RAM column is frequency/latency-dependent on this part → every pad, staircase entry and budget in §3.2/Appendix A-B is void until re-measured; flash-copy kernels *are* allowed to differ (that is what `LATENCY` buys) and their 48 MHz values become the flash cost model for the non-timed dispatch tail (R3/OQ14) |
+| OQ-B | Was the cost table measured only on F002A/F003/F030's die? F002B is a different die, shared with L020 (CF §1 "ОТКРЫТО") | `rework/ledger.md` §5 "Gate 2" = `rework/risks_verdict.md` G3 (24 MHz/LAT0, like-for-like) then G5 (48 MHz/LAT1, post-calibration) | Every F002B kernel equals F030's value at the same clock/latency | F002B needs its own `--cost-table`; if `ldr/str` to RAM (K3) comes back 4 instead of 2 there, §2.1's "RAM is favourable" conclusion is F030-only, and Appendix A loses cycles on F002B that must be found (branchless EOB restructuring, `rework/risks_verdict.md` R13) |
+| — | Is the "2-3 cycles" taken-branch cost a fixed constant, or does it depend on alignment / the previous instruction, as the author warns — «зависит от выравнивания и зависимости от предыдущей инструкции» (xm_030.md:468-469)? This also stands in for the fetch-width question (16 vs 32-bit, unknown on PY32, TRM p2-2 §2.2.1) that v2's OQ4 asked and no single kernel answers directly | K7 (`b .+2` at a 4-byte-aligned address) vs K8 (same, at an odd halfword) — part of Gate 1 above | K7 == K8, and each is stable across the 16 repeats | K7 ≠ K8 → alignment matters from RAM → `.balign 4` on every loop head and branch target, and the walker must carry `B` as a range, not a constant (R4; already anticipated in §3.2 Consequence 5) |
+| — | Can F002B's HSI actually be trimmed to inside USB tolerance from the on-chip LSI before the D− pull-up, given the LSI itself is characterized on one unit only (−0.18 %, xm_002b.md:204-206) against a ±3 % datasheet ceiling (DS002B T5-14) — a 15× spread between the two numbers with no way from the documents to say which describes production parts | `rework/risks_verdict.md` G4: ≥5 units, `TRIM_L` swept against an LSI-derived reference at 25 °C, `TRIM_H` held fixed per the R20 band | Every unit lands within ±1.5 % of 48 MHz after one pass; the LSI reference itself spreads ≤0.5 % unit-to-unit | Spread > 0.5 % or any unit out of tolerance → a per-board OTP calibration constant is required (128 B OTP, CF §3); if that is not viable in production, F002B is dropped as a target (Р5 decision 4) |
+| OQ7 | Are all GPIO ports on the single-cycle IOPORT, or only the one Xiamatsu happened to use? Port F on F030 and the F002B ports are not separately confirmed | K1 (`ldr r0,[r1,#0x10]` against GPIOA/GPIOB/GPIOF) — part of Gate 1/2, per-port | K1 = 1 cycle on every port tested, both parts | A port ≠ 1 cycle → the one-sample-per-slot structure loses its P = 1 assumption on that port; the sample structure must find the lost cycle elsewhere before that port is used for D± |
+| — | Does crystal-less HSI drift stay inside the sampling margin (≈0.44 %, §2.4.5) over the *whole* operating envelope on F030/F003, not just at room temperature — and specifically, over supply voltage, which neither datasheet tables (temperature only) nor any gate currently sweeps | `rework/risks_verdict.md` G10 sweeps temperature (`rx.slope_cyc_per_bit` under a hair-dryer/freezer run); **it does not sweep VDD** | `rx.slope_cyc_per_bit` ≤ 0.16 across temperature *and* the datasheet's VDD range | G10 as written can pass while a VDD-dependent drift still exists in the field, because it never varies VDD — this is flagged here as an ungated gap, not answered; closing it means adding a VDD sweep to G10 (or a G10b), which this fragment cannot do on its own authority |
+| OQ3 | `HSI_TRIM` LSB weight, sign and monotonicity of the 13-bit field, inside the `TRIM_H` band 48 MHz falls in (R20) | bench6, run as part of G4's sweep, read via MCO/2 | Monotonic, sign consistent, LSB weight small enough that the servo can capture ±1.5 % without crossing a `TRIM_H` boundary (R20) | Wrong-sign or non-monotonic → the servo's actuator law (Р5 decision 6) needs the sign/gain reworked before it is trusted on F002B |
+| OQ6 | 002B "Load Flash" boot zone: option-byte programming flow, erase-protection reliability, RDP lock-out risk (PA A-11) — a brick-proof loader alternative to Р6, not clock-critical but only relevant on the part this flip demoted to target #2 | Read RM002B p20-21/p42; try on hardware once DFU already works, using G0's recovery procedure as the safety net if it bricks | A programming/erase sequence exists that cannot lock the part out under any observed fault | If RDP lock-out is reachable from a partial write, this stays a documented "do not implement" rather than a shipped feature |
+
+**Caution for whoever runs the benches above, not a question of its own:** this build system
+places objects outside `Build/` and does not key them by part, so switching `MCU_TYPE` and
+rebuilding without a full `find . -name '*.o' -delete` silently reuses objects compiled for the
+previous part (BF §10.1) — it produced a false "F030 does not build" during this very
+investigation. G1/G3/G5's K1-K11 kernels are exactly the kind of per-part rebuild this bites;
+clean fully between parts or the gate result is worthless, not merely wrong.
+
+**Mooted, not closed, by the Р4 decision:** v2's argument against TX-in-flash raised "a TX cell
+whose cost is unmeasured is not a cell one can pad" (this fragment's own draft called it OQ15).
+Р4's final decision moves TX into RAM alongside RX, so the unmeasured flash column no longer
+prices a timed bit cell — the question evaporates, it is not answered. The flash column still
+prices the *non-timed* dispatch tail that Р4 leaves in flash by design (§3.2 Consequence 3); that
+is R3/OQ14's residual, tracked in `rework/ledger.md` and `rework/risks_verdict.md`, not restated
+here.
+
+**Superseded, not restated:** v2 OQ9 (keepalive count before the host's first SETUP) is now
+`rework/risks_verdict.md` R15, gated by G9; both parts are in scope there, F002B starting from
+the post-G4 calibrated value rather than the factory word. Nothing in this fragment adds to it.
+
+**Not this fragment's territory, and said once so nothing is silently dropped:** v2 OQ2 (SRAM
+retention across `SYSRESETREQ`) is `rework/risks_verdict.md` R7; OQ5 (EXTI entry latency) is R5,
+gated by G6; OQ10 (D± edge rates) is R12; OQ13 (`dfu-util` interop) keeps its label and is the
+measurement inside G12; OQ14 (dispatch-in-flash cost) keeps its label as R3's residual. OQ8 (5 V
+I/O tolerance) was already dismissed by v2 itself as irrelevant at this plan's 3.3 V-only design
+and needs no gate. OQ11 (trailing stuff bit after a six-ones CRC) and OQ12 (macOS `GET_STATUS`
+quirk) are protocol-correctness questions, not clock or cost-model ones; they are not picked up
+by any of the three rework fragments and stand exactly as v2 left them, unowned.
