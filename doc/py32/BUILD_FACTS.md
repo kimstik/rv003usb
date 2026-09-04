@@ -364,3 +364,57 @@ symbol: F003 never asks for a clock. For a bit-banged USB stack whose entire
 correctness rests on 48 MHz, a silently unclocked build is a trap worth a
 build-time guard: the port should fail to compile for any part it has no clock
 path for, rather than produce a plausible image.
+
+## 11. The F003 PLL question — narrowed, not settled
+
+§10.2 left a straight contradiction: the vendor headers do not define
+`RCC_PLL_SUPPORT` for F003, while `CHIP_FACTS_XIAMATSU.md` §2 cites a
+measurement that the PLL locks at 48 MHz on F002A and F003. Comparing the `RCC`
+register structs across the three headers narrows it.
+
+`RCC_TypeDef`, first six fields:
+
+| offset | py32f030x8.h | py32f003x4.h | py32f002bx5.h |
+|---|---|---|---|
+| 0x00 | CR | CR | CR |
+| 0x04 | ICSCR | ICSCR | ICSCR |
+| 0x08 | CFGR | CFGR | CFGR |
+| **0x0C** | **PLLCFGR** | **RESERVED0** | **RESERVED0** |
+| 0x10 | ECSCR | ECSCR | ECSCR |
+| 0x14 | RESERVED1 | RESERVED1 | RESERVED1 |
+
+The rest of the struct is field-for-field identical across all three. F003 and
+F002B carry a reserved word at exactly the offset where F030 declares
+`PLLCFGR`, and neither declares any of `RCC_CR_PLLON` (bit 24),
+`RCC_CR_PLLRDY` (bit 25) or the `RCC_PLLCFGR_*` field set, all of which F030
+does.
+
+**What this is evidence for, and what it is not.** A reserved word exactly where
+another member of the family has a real register is consistent with the block
+existing in silicon and merely being undeclared for parts it is not sold with —
+which is what the Xiamatsu measurement claims and what the "one die, several
+markings" view of these parts would predict. It raises the prior. It is **not**
+proof, for a reason visible in the same table: F002B has the identical hole, and
+F002B's own measured source states the PLL is absent there ("HSE на F002B —
+только вход (1–32 МГц), PLL отсутствует", `CHIP_FACTS_XIAMATSU.md` §2). These
+headers are plainly generated from one template, so a `RESERVED0` at 0x0C may
+record nothing more than the template's shape. Anyone citing this table as
+settling the question is overreading it.
+
+**The bench test it makes cheap and precise.** On an F003 part, with
+`RCC_BASE` = 0x40021000 (verified §7):
+
+1. Write the PLL source and configuration to `0x4002100C` using F030's
+   `RCC_PLLCFGR_*` field layout.
+2. Set bit 24 (`PLLON`) in `RCC->CR` at `0x40021000`.
+3. Poll bit 25 (`PLLRDY`). If it sets, the block is present and the header is
+   merely conservative; if it never sets, F003 has no PLL and the flip's primary
+   path is **F030 only**.
+4. Independently confirm the resulting frequency rather than trusting `PLLRDY` —
+   MCO on PA7 does not go above roughly 35 MHz (`CHIP_FACTS_XIAMATSU.md` §3), so
+   measure with division.
+
+The outcome is not cosmetic. If F003 has no PLL, the target flip still stands on
+F030 but F003 joins F002B on the self-calibration track, and the "primary family
+needs no servo" claim has to be narrowed to F030 alone. The plan should carry
+both branches rather than assume the favourable one.
