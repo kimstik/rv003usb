@@ -109,3 +109,126 @@ request until the whole source it rests on has been re-read end to end, and the 
 quotes the passage that carries the overturn. The measured-cost reading of d2b4a14 cited one
 column of a two-column table and survived a full plan pass before 88d1229 caught it; the rule
 exists so that the next such overturn costs a re-read, not a run.
+
+---
+
+## NEW SECTION — §10A Bring-up gates
+
+Ordered, board-scoped, one yes/no question each, one bench measurement each. This is the section
+§10.1's "gate that closes it" column points to. Every kernel-level measurement detail (firmware,
+timing method, expected values) is `rework/ledger.md` §5's job (kernels K1-K11, its "Gate 1" and
+"Gate 2") — this table only fixes **when** each runs and **what happens on failure**; it does not
+redefine K1-K11 or their pass values. Gates run in the order listed; none needs USB traffic, a
+host, or the engine image except G6 onward.
+
+Two things this project already knows without a bench and therefore does **not** gate here:
+the toolchain is installed and both `#if PY32F002Bx5`/`#if PY32F003x4` arms assemble and the
+engine links against a pinned `py32f0-template` (BUILD_FACTS.md §1-2, §6 — a build, not a
+measurement); and the RAM-placement hazard of D-5 (a linker script spelling `*(.data.*)` would
+silently strand `.datacode` in flash) is retired by a build-time `ASSERT` on the section's VMA,
+not by anything a bench can fail (BUILD_FACTS.md §4, DEFECTS_VERIFIED.md D-5). That is why the
+numbering below has no G2 and no G8 — both slots would have been exactly these two, and putting
+either on a bench would be the "generic gate for anything" this section exists to avoid.
+
+| G | Yes/no question | Board(s) | Measurement | Pass | On fail |
+|---|---|---|---|---|---|
+| G0 | Can a probe still attach after a bring-up build reconfigures clocks/pins at reset? | F030, F002B | Flash a build with immediate clock/pin reconfiguration; attempt SWD attach within the 100 ms `SWD-Delay` window (`xm_030:376-378`, R24); once per part, deliberately exercise the documented recovery path once | Probe attaches inside the window on both parts; the recovery procedure (F030: UART ISP at BOOT0=1, `xm_030:374`; F002B: power-on erase via CMSIS-DAP, `xm_030:379-380`, no ROM loader) actually un-bricks a board | Widen the startup delay before any clock/pin write in bring-up builds; do not touch clocks/pins earlier until this passes (R24) |
+| G1 | Does the RAM column of the measured cost table hold at 48 MHz / `LATENCY=1`? | F030 (target #1) | `rework/ledger.md` §5 "Gate 1": K1-K11 at 24 MHz/LAT0 (calibrates the rig against `xm_030:464-493`), then at 48 MHz/LAT1 | RAM-copy kernels K1-K4, K7-K11 identical between the two runs (cycles are per-HCLK; a RAM-resident kernel touches no flash so `LATENCY` must not show up) | Re-ledger with the 48 MHz numbers via `tools/py32_cyc.py --cost-table`; no pad constant in Appendix A/B is final before this gate (R4, R22) |
+| *(no G2 — settled without hardware, see above)* | | | | | |
+| G3 | Does F002B reproduce the *same* table F030 gave at 24 MHz/LAT0 (like-for-like sanity)? | F002B (B-C silicon, `DBG_IDCODE` recorded) | `rework/ledger.md` §5 "Gate 2", first half: same kernel image, factory HSI24 word, `LATENCY=0` | Every kernel equals G1's 24 MHz/LAT0 F030 value | F002B is a different die for costing purposes (it shares silicon with L020, not with F002A/F003/F030, `xm_030:464`) → own `--cost-table` from here on (R13) |
+| G4 | Can F002B trim its own HSI to inside USB tolerance from the on-chip LSI, before the D− pull-up? | F002B, ≥5 units | Run the self-calibration routine (`TRIM_L` swept against an LSI-derived reference count, `TRIM_H` held fixed per R20's band) at 25 °C; read the result via MCO/2 (R21) | Every unit lands within ±1.5 % of 48 MHz after one pass, and the LSI reference itself spreads ≤0.5 % unit-to-unit (`xm_002b:204` measured −0.18 % on one unit vs DS002B T5-14's ±3 % datasheet ceiling — which one describes production parts is what this gate answers) | Spread > 0.5 % or any unit out of tolerance → per-board OTP calibration constant written at production (128 B OTP, XF §3); if that is not viable, F002B is dropped as a target (R19, R21) |
+| G5 | Does the RAM column hold on F002B at 48 MHz / `LATENCY=1`, post-calibration? | F002B, same units as G4 | `rework/ledger.md` §5 "Gate 2", second half: same kernels, `HSI_FS=101` post-G4, `LATENCY=1` (mandatory above 30 MHz, `xm_002b:259`) | Every kernel equals G1's 48 MHz F030 RAM-copy value | F002B keeps its own `--cost-table`; if K3 = 4 from RAM there, §2.1's "RAM is favourable" conclusion is F030-only and Appendix A loses cycles on F002B that must be found (branchless EOB restructuring, R13) |
+| G6 | Is IRQ entry inside the [11,74]-cycle window on real silicon? | F030, F002B (post-G3/G5 for F002B's own costs) | Bench3-style: EXTI edge → first-instruction toggle, median + spread, equal-priority ISR and SysTick-at-prio-0 deliberately excluded | Median + spread inside [11,74] on both parts, using each part's own measured `PUSH`/entry cost (G1/G5) | Enforce Р7 (RAM vector table); forbid equal-priority ISR / SysTick at prio 0 in `usb_port_hw_setup()` (R5) |
+| G7 | Does the bounded preamble spin leave the dribble sample band intact? | F030, F002B | VCD `rx` sample-offset histogram under the 4/4/4/7 bounded counter, re-derived from G1/G5's measured `BL` | Histogram min ≥ 14, max ≤ 18 (of 32, F5's 260 ns dribble allowance) | Re-derive `USB_RX_SYNC_DELAY`; fall back to a 7/7/7 unrolled counter shape (R18) |
+| *(no G8 — settled without hardware, see above)* | | | | | |
+| G9 | Does the servo lock before the host's first SETUP? | F030 (drift only, no cold-start trim needed), F002B (post-G4, locking from up to ±3 % start, R21) | Count keepalives between reset end and first SETUP on Win10/11 xHCI, direct and behind a TT hub (OQ9); compare against measured lock time with `USB_TRIM_LOCK_N`/`_FAST_SHIFT` | Lock completes (within the ≈0.44 % sampling margin, §2.4.5) before the counted keepalive budget on every host path tested | Tune `USB_TRIM_FAST_SHIFT`/`LOCK_N`; F030 fallback: HSE crystal build; F002B fallback: per-board OTP constant, same as G4 (R15) |
+| G10 | Does the servo hold lock across temperature? | F030, F002B (HSI builds only) | Hair-dryer/freezer sweep with the servo active, `rx.slope_cyc_per_bit` sampled continuously | `rx.slope_cyc_per_bit` ≤ 0.16 throughout, enumeration never drops | Slower slow-rate gain (`USB_TRIM_SLOW_SHIFT`), wider saturation window; F030 fallback: HSE crystal build (R2) |
+| G11 | Is turnaround inside 7.5 bit-times with C handlers running from flash? | F030, F002B | `wg015vcd.py tx --gate-turnaround 7.5` on SETUP status and DFU GETSTATUS, at 48 MHz/`LATENCY=1`, flash-column costs (G1/G5's flash-copy kernels, R8's inferred-upward figure) | ≤ 7.5 bit-times on every capture | Move the hot C path (`usb_pid_handle_in/data`) into `.timecrit` (RAM); then the ACK-first pipeline restructuring (R8) |
+| G12 | Do flash timing registers, loaded for the active clock, read back correctly? | F030 (HCLK = 2×HSI via PLL, R6's datasheet gap), F002B (48 MHz timing set exists only on B-C silicon, RMBC p24) | DFU program/erase/readback, reusing T10's existing 100-cycle `dfu-util` interop run (OQ13) rather than a new cycle count | Readback matches on every page across that run, on both parts | Load exactly the `__HAL_FLASH_TIMMING_SEQUENCE_CONFIG` set for the HSI mode in use; restrict the 48 MHz DFU path to confirmed B-C silicon on F002B (R6) |
+
+Neither G1, G3 nor G5 needs USB traffic, a host, or the engine — they and G0 can run before any
+of G6-G12. G4 gates G5 and the F002B leg of G9 (both need the calibrated HSI in hand); G1 gates
+every pad in Appendix A/B (R22) before G6 can even be scored, since G6's window depends on G1's
+`PUSH`/entry costs.
+
+---
+
+## REPLACES §12 — Changelog vs the pre-prior-art plan
+
+Items 1-56 are v2's `§12` (v1 → v2, driven by `PRIOR_ART.md`) — **unchanged**, see
+PLAN.md at 88d1229 or `git show 88d1229:doc/py32/PLAN.md` for the full text; they are not
+reproduced here to avoid re-stating 56 lines that this rework did not touch. This rework
+(v2 → this revision) is driven by `CHIP_FACTS_XIAMATSU.md` (measured silicon, marked XF),
+`BUILD_FACTS.md` (verified by building in this container, marked BF) and
+`DEFECTS_VERIFIED.md` (verified in source, marked DV); it adds:
+
+57. §0: primary target flipped from F002B to F030/F003 — HSI 24 MHz × PLL2 measured at
+    47.98 MHz (−0.04 %), inside USB tolerance with **no servo needed at reset**; F002B demoted
+    to second target, gated on an HSI-vs-LSI self-calibration stage before the D− pull-up
+    (new §10A gate G4) — source: XF §2 (`xm_030:336`; `xm_002b:172-175`, `:209-210`, `:269-270`).
+58. §0/§10 (Р4, RAM placement of the engine): **re-examined and survived**, not overturned —
+    confirmed twice over. First by Xiamatsu's own-silicon measurement (RAM data access 2 cycles
+    not 4, `PUSH`/`POP` 2+1, GPIO ports "at full speed" from RAM, "не замедляется, как
+    ожидалось", `xm_030:481-493`, `:447`). Second, independently, by linking the actual engine
+    object against the stock `py32f003x4.ld` and observing `.datacode` — the whole hard-real-time
+    RX sampling path — actually land at VMA `0x20000000` / LMA `0x08000200` (BF §3-4). A draft of
+    this rework (commit d2b4a14) briefly concluded the opposite from one column of the same
+    source table ("RAM data 4 cycles → RAM placement is the mistake"), withdrawn in 88d1229
+    once the RAM column was read; that mistake is now §10.3's process rule (R26) — source: XF §1;
+    BF §3-4; `git show d2b4a14`, `git show 88d1229`.
+59. §3.2/Appendix B: the earlier flat assumption "flash execution is the expensive case, RAM is
+    the cheap one" does not hold — the costs **swap by location** (flash: RAM-data 4,
+    `PUSH`/`POP` 4+1(n−1), literal-pool 2; RAM: RAM-data 2, `PUSH`/`POP` 2+1(n−1), literal-pool
+    4). The one direction that gets *worse* in RAM is a PC-relative literal load whose pool is
+    still in flash. New rule R23: every literal pool reached from `.timecrit` must resolve to an
+    SRAM address, checked mechanically by disassembly, not guaranteed by construction — source:
+    XF §1 table; `xm_030:490`.
+60. New split, not previously stated: the engine is not one execution context for costing
+    purposes. The RX path runs from RAM (`.datacode`, 252 B — the entire hard-real-time sampling
+    path) and the TX path runs from FLASH (`.text`, 512 B, confirmed by `objdump -h` on the
+    actual object, BF §3). Every earlier statement about "the engine"'s cost must be read as two:
+    RX costed on the RAM column (§3.2 Consequences 1-2), TX and the C dispatch tail on the flash
+    column (§3.2 Consequence 3, R8's turnaround risk). Flags a latent trap in the other
+    direction, left open rather than decided: relocating TX to RAM would turn its own
+    flash-resident literal load (`.text+0xda`) into a 4-cycle access while its current
+    RAM packet-byte reads (4 from flash today) would drop to 2 — an arithmetic question for the
+    ledger, not yet answered — source: BF §3, §5.
+61. D-1 (endpoint bound check): confirmed by source inspection and **reclassified from
+    "possibly inherited" to branch-introduced** — the Thumb port's `bhi` (rejects only
+    `endp > ENDPOINTS`) replaces the RISC-V original's correct `bgeu` (rejects
+    `endp >= ENDPOINTS`) at the equivalent site; the comment on the very same faulty line still
+    states the intended `<` semantics, so this is a coding slip, not a design choice. Consequence
+    traced through to `eps[ENDPOINTS]`, one element past the last member of
+    `struct rv003usb_internal`, reachable by any host token addressed to the boundary endpoint —
+    source: DV D-1 (`rv003usb-arm.S:274-277` vs `rv003usb.S:526-528`).
+62. D-2 (RX overrun): confirmed real, already flagged by the author's own `// TODO`, but
+    **reclassified from an implicit one-line fix to a design task** — `is_end_of_byte`'s
+    unchecked `strb`/`add` sit inside the cycle-counted RX path (cycle-budget comments in place
+    on the same lines), so any bound check must be paid for out of the bit-cell budget or moved
+    off the hot path — source: DV D-2 (`rv003usb-arm.S:145-148`).
+63. "The per-part `#if` variant is never assembled" (a claim in earlier drafts) is **too strong,
+    corrected**: both `#if PY32F002Bx5` arms assemble cleanly (`-DPY32F002Bx5=1` and
+    `-DPY32F003x4=1` both rc=0, objects differ by 4 bytes). What is actually missing is the
+    build system's *selection* of the non-default arm — `Makefile.py32` pins
+    `MCU_TYPE = PY32F002Bx5` unconditionally. This matters more after item 57's target flip,
+    since F003/F030 now exercises exactly the arm the branch's own build has never run — source:
+    BF §2; DV D-3.
+64. D-4 (link failure) and D-5 (incidental RAM placement) added as verified findings: the
+    branch's `py32f0-template` submodule is empty so it cannot link as published (pins cleanly
+    at upstream `289ffc8`); and the `.datacode`→RAM placement that item 58 confirms is not the
+    product of any explicit rule anywhere in the branch or its template — it is swallowed by the
+    stock linker script's `*(.data*)` wildcard by accident. A script spelling the more common
+    `*(.data.*)` form would place the RX engine in flash silently, no build error, no
+    diagnostic. This port's own linker script must therefore carry an explicit named RAM-code
+    section and an `ASSERT` on its VMA — a build-time check, deliberately **not** one of the
+    §10A bring-up gates — source: BF §4, §6; DV D-4, D-5.
+65. New §10A "Bring-up gates" (this file): turns §10.1's "gate that closes it" column into an
+    ordered, citable sequence of yes/no hardware measurements (G0-G12, skipping G2 and G8 —
+    items 66 and 64 respectively); defers the cost-table measurement detail to
+    `rework/ledger.md` §5 (kernels K1-K11,
+    its Gate 1/Gate 2) instead of inventing a parallel scheme — source: this file;
+    `rework/ledger.md` §5.
+66. Toolchain/link viability (`arm-none-eabi-gcc` 13.2.1 present; both MCU arms assemble; the
+    engine links once `py32f0-template` is vendored/pinned) is recorded as a build fact and
+    explicitly **excluded** from §10A — it needed no hardware and was already settled by
+    building in this container — source: BF §1-2, §6.
