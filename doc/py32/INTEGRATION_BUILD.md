@@ -86,3 +86,65 @@ which is CLEANSHEET's structure.
 **That single measurement is now the most valuable bench item in the project**,
 ahead of the taken-branch cost, because it decides whether this build is a
 working stack or only a well-sized one.
+
+## RAM residency is not a footprint competitor at 24 MHz — proven
+
+Code that executes from RAM must still be *stored* in flash, as the load address
+the startup copy reads from. So RAM residency costs flash **plus** RAM, never
+flash instead of RAM. Measured rather than argued, same part, same sources, only
+the section directive changed:
+
+| engines in | FLASH | RAM |
+|---|---|---|
+| `.text.engine16` (flash) | 4520 B | **336 B** |
+| `.datacode` (RAM) | 4640 B | **3600 B** |
+
+RAM residency costs **+120 B of flash and +3264 B of RAM**. Worse on both axes.
+
+The mechanism is visible in the section headers of the RAM-resident build:
+
+```
+.data   size 0x00000cc8   VMA 20000000   LMA 08000858
+```
+
+3272 B occupying RAM at run time and the same 3272 B occupying flash as the copy
+source. Nothing about executing from RAM removes the flash cost.
+
+So at 24 MHz, where LAT = 0 makes flash fetch single-cycle and deterministic,
+RAM residency is **capable but never cheaper**. It buys exactly one thing: a
+2-cycle RAM data access where the flash figure is unmeasured. At 48 MHz the
+choice does not exist — LAT = 1 forces RAM residency and the footprint cost
+comes with it.
+
+## How things landed — from the linked image
+
+```
+08000244  usb_pid_handle_in         C layer, flash
+080003b8  usb_rx_engine16           = EXTI2_3_IRQHandler (alias)
+08000464  usb_rx_cell0 .. cell7     the unrolled chain, 0x1e/0x20 apart
+080007ac  usb_tables                RX tables, flash
+08000ad2  usb_send_data
+08000b5c  usb_tx_cellP0 .. cellS7   the ten-cell TX chain
+08000d24  usb_tx_tables             TX tables, flash
+2000003c  rv003usb_internal_data    RAM
+200000a0  usb_rxbuf                 RAM, 32-byte aligned
+200000c0  usb_txbuf                 RAM
+```
+
+Three things checked in the dump rather than assumed:
+
+* **`usb_rxbuf` is 32-byte aligned and it is declared, not lucky** —
+  `.balign USB_RXBUF_LEN` at `engine16_merged.S:724`, carrying the comment that
+  the mask depends on it. Together with the `lsls #27 / lsrs #27` index mask
+  that gives the structural buffer bound, and the alignment it rests on is
+  guaranteed by the source.
+* **Cells 1 and 4 land at odd halfword alignment** (0x08000482, 0x080004de).
+  Since the measured cost table says taken-branch cost depends on alignment,
+  this would matter for most designs. It does not matter here, and the reason is
+  the design's central property: the chain contains **no timed taken branches**.
+  Cells fall through consecutively and only cell 7 does `bx lr`. The alignment is
+  harmless by construction rather than by luck.
+* **The C calling convention is correct.** The fifth argument
+  `struct rv003usb_internal *ist` is passed on the stack — `push {r4}` before
+  each `bl`, `add sp, #4` after — matching the prototypes at `rv003usb.c:197`,
+  `:283`, `:291`, `:519`, `:527`.
