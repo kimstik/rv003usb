@@ -158,21 +158,63 @@ What the competition settled that had been open:
 
 ## What the merge left open — the current front
 
-1. **Turnaround: 203..229 cycles, 12.7..14.3 bit times from SE0 to the C call.**
-   USB 2.0 §7.1.18 asks 6.5; the host timeout is 16-18. Inside what the host
-   tolerates, outside what the specification asks. This is a property of 24 MHz,
-   not of the merge. The answer already exists in the project as ACK-first
-   (`PRIOR_ART.md` R8, `doc/wg015/TODO.md` item 3), where it was explicitly
-   deferred *pending a measured turnaround*. That measurement now exists, so the
-   item is live.
-2. **No transmit.** The merged engine receives only. A 16-cycle TX bit cell is
+1. **Turnaround — ANALYSED, see `turnaround.md`. Conformance is reachable and
+   hangs on a single-digit cycle count from the transmitter.**
+
+   Three findings reshaped the problem before any speculative design:
+   * The recorded 203..229 was measured **from the wrong zero point**. §7.1.18
+     measures from the SE0→J transition, roughly 24 cycles *after* the engine's
+     SE0-detecting sample — 1.5 bit times free. But the worst case is SE0 in
+     cell **1**, not cell 0, and the corrected figure is 208..237 to the C call.
+     With the C handler and TX arm added, that plausibly puts the current engine
+     outside the **16-18 bit-time host timeout** as well, not merely outside
+     spec. The problem was understated, not overstated.
+   * **The C layer never made a decision the response depended on** — verified
+     here independently in `rv003usb/rv003usb.c`: every path of
+     `usb_pid_handle_data` reaches `just_ack`, `usb_pid_handle_in` never NAKs,
+     `usb_pid_handle_out` sends nothing, and there is no NAK or STALL anywhere
+     in the file. So the engine can emit the response itself and call C
+     afterwards, with the §4 prototypes unchanged. **One exception, correctly
+     identified and handled by the analysis**: under
+     `RV003USB_USER_DATA_HANDLES_TOKEN` the handler returns early and owns the
+     response, so that option must disable the mechanism. No in-tree config
+     enables it.
+   * **Tokens need no CRC5.** The legal `(byte2,byte3)` halfword is one value
+     per endpoint, so comparing against 2-4 precomputed patterns validates
+     address, endpoint and CRC5 together in about 8 cycles.
+
+   Result: **τ+114+A cycles, i.e. (90+A)/16 bit times**, where A is the
+   transmitter's arm-to-first-edge cost. A ≤ 10 gives 6.25 bit times, conformant
+   with margin. A = 14 is exactly 6.5 with none. A = 51 is 8.8 and fails.
+
+   **ACK-first turns out to be unnecessary if A ≤ 10**, which was the outcome
+   the brief asked for if ordinary means sufficed. If A > 26, the fallback is
+   **SYNC-first, PID-gated** — conformant at 5.5 bit times for any A ≤ 62, and
+   deliberately *not* the form recorded as R8. Recorded ACK-first puts a valid
+   ACK PID on the wire before the CRC verdict and gates only the EOP, so a false
+   ACK is possible; because this engine folds CRC16 in-slot, only SYNC's 8 bit
+   times are needed, the ACK PID stays downstream of the residue check, and a
+   false ACK becomes **structurally impossible**. That is an improvement on the
+   project's own recorded plan.
+
+   Stated honestly by the analysis: the abort mechanism deviates from §8.4.5's
+   "no handshake on CRC error", and the argument for it is indistinguishability
+   from a bus-corrupted handshake rather than a citation.
+2. **No transmit** — in progress. The merged engine receives only, and the
+   turnaround analysis has made the TX entry cost `A` the single number the
+   whole conformance question now rests on. A 16-cycle TX bit cell is
    unwritten. `NATIVE` sketched a hardware alternative worth evaluating:
    output-compare toggle mode plus DMA is a hardware NRZI transmitter, because
    NRZI *is* "toggle on 0" and the toggle list is always precomputable — zero
    CPU cycles per bit, 26 cycles to arm. Its breakages are listed in
    `engine16_native.md` and it does not exist on F002B.
-3. Phase lock is +/-3.5 cycles and unbenched; there is no mid-packet resync.
-4. 1812 B of RAM-resident code and tables, of which 512 B is the CRC16 table —
+3. **The 24-vs-48 MHz question now has evidence.** At 24 MHz the irreducible
+   post-EOP work — the two wire bytes carrying CRC16 — is 89 measured cycles,
+   **86 % of the entire 104-cycle budget**. At 48 MHz it is 43 %, and the
+   requirement on the transmitter relaxes from A ≤ 10 to A ≤ 136. At 48 MHz the
+   turnaround is a non-issue; at 24 MHz conformance is reachable but contingent.
+4. Phase lock is +/-3.5 cycles and unbenched; there is no mid-packet resync.
+5. 1812 B of RAM-resident code and tables, of which 512 B is the CRC16 table —
    significant on a 3 KB part, and a candidate for trading back against cycles.
 
 ## Integration status
