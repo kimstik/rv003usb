@@ -20,15 +20,19 @@ Usage:
 import argparse, re, subprocess, sys
 
 # (min, max) cycles.  Ranges are real hardware ambiguity, not tool uncertainty.
-def cost(mnem, ops, exec_from, ioport_regs=()):
+def cost(mnem, ops, exec_from, ioport_regs=(), flash_regs=()):
     m = mnem.lower()
     # objdump prints width suffixes (b.n, beq.w); they are not part of the
     # mnemonic for costing purposes.  Missing this scores an unconditional
     # branch as 1 cycle instead of 2-3.
     if m.endswith('.n') or m.endswith('.w'):
         m = m[:-2]
-    ram_data  = (2, 2) if exec_from == 'ram' else (4, 4)
-    lit_pool  = (4, 4) if exec_from == 'ram' else (2, 2)
+    # Rows are indexed by WHICH MEMORY is touched, not by addressing mode:
+    # ports 1, flash 2, RAM 4 for flash-resident code; the flash and RAM
+    # columns swap for RAM-resident code (xm_030.md:470-486).
+    ram_data   = (2, 2) if exec_from == 'ram' else (4, 4)
+    flash_data = (4, 4) if exec_from == 'ram' else (2, 2)
+    lit_pool   = flash_data
 
     if m in ('push', 'pop'):
         n = len(re.findall(r'[a-z0-9]+', ops.split('{')[-1].split('}')[0])) if '{' in ops else 1
@@ -47,8 +51,12 @@ def cost(mnem, ops, exec_from, ioport_regs=()):
         # this wrong is not cosmetic: the IDR read is the most frequent
         # operation in the bit cell.
         mo = re.search(r'\[(\w+)', ops)
-        if mo and mo.group(1).lower() in ioport_regs:
-            return (1, 1)
+        if mo:
+            base = mo.group(1).lower()
+            if base in ioport_regs:
+                return (1, 1)
+            if base in flash_regs:
+                return flash_data
         return ram_data
     if m == 'bl':   return (4, 4)
     if m in ('bx', 'blx'): return (3, 3)
@@ -65,6 +73,10 @@ def main():
     ap.add_argument('--budget', type=int, default=None,
                     help='flag any block whose max exceeds this (e.g. 16)')
     ap.add_argument('--section', default=None)
+    ap.add_argument('--flashdata', default='',
+                    help='comma-separated registers pointing at a table in '
+                         'FLASH; loads through them cost 2 from flash-resident '
+                         'code and 4 from RAM-resident code')
     ap.add_argument('--ioport', default='',
                     help='comma-separated registers holding a GPIO base, e.g. '
                          '"r3,r9" - loads/stores through them cost 1 cycle')
@@ -78,6 +90,7 @@ def main():
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         sys.exit(f'objdump failed: {e}')
 
+    flashregs = tuple(r.strip().lower() for r in a.flashdata.split(',') if r.strip())
     ioport = tuple(r.strip().lower() for r in a.ioport.split(',') if r.strip())
 
     label_re = re.compile(r'^([0-9a-f]+) <([^>]+)>:')
@@ -94,7 +107,7 @@ def main():
             addr, _, mnem, ops = mo.groups()
             ops = ops.split(';')[0].split('@')[0].strip()
             if mnem.startswith('.'): continue
-            cur['insns'].append((addr, mnem, ops, cost(mnem, ops, a.ex, ioport)))
+            cur['insns'].append((addr, mnem, ops, cost(mnem, ops, a.ex, ioport, flashregs)))
 
     print(f'# cost model: code executing from {a.ex.upper()}  '
           f'(ENGINE16_SPEC.md §2, measured at LAT=0)')
