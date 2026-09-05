@@ -3,7 +3,7 @@
 Mirrors doc/wg015/STATE.md: what is done, what is in flight, what is next.
 Kept current so a session that dies mid-run can be resumed from this file alone.
 
-Last updated: 2026-09-04. All four fragments complete and spliced into PLAN.md.
+Last updated: 2026-09-05. All four fragments complete and spliced into PLAN.md.
 
 ## Where the plan stands
 
@@ -124,3 +124,61 @@ Three limit hits across two model families have cost **zero** work, because ever
 agent wrote into an isolated git worktree that outlives it. Files were salvaged
 from worktrees even where the agent died before committing — a 491-line ledger
 among them. Any future fleet run on this repo should keep that arrangement.
+
+
+## The 24 MHz / 16-cycle engine competition — CLOSED, merged engine exists
+
+Six independent engines were written against `ENGINE16_SPEC.md`, then a referee
+merged them. Full record with every claim re-checked: `ENGINE16_RESULTS.md`.
+
+**Result: `engine16_merged.S` receives at exactly 16 cycles per bit on every
+data path, with zero exposure to the 2-vs-3 taken-branch ambiguity.** Verified
+independently with `tools/engine16_cyc.py` and in raw `objdump`. A bit-exact
+model of it decodes 305 host-encoded packets with no failures.
+
+Mechanisms and their origins: VUSB's register-offset table and wire-domain
+unroll; DESCENT's combined D+/D- sample-and-mask, which yields SE0 detection
+free from the read that performs the NRZI test; CLEANSHEET's carry-chain `adcs`
+capture; GRAINUUM's per-byte unroll granularity; BALANCE's structural buffer
+bound, which closes `DEFECTS_VERIFIED.md` D-2 by construction with no runtime
+check.
+
+What the competition settled that had been open:
+* **Per-byte unrolling is required**, established independently from four
+  directions, and one byte is the right granularity — unrolling a whole packet
+  fails because a short conditional branch cannot keep an SE0 escape in range.
+* **A shared byte-boundary handler cannot work at 16 cycles**, for an arithmetic
+  reason: it inherits 1-4 cycles of its caller's remaining budget while a byte
+  store needs 7.
+* **DMA cannot reach GPIO on this part** — GPIO is on a core-private IOPORT bus.
+  The same decision that makes a port read cost one cycle puts it out of DMA's
+  reach.
+* A table lookup beats mask arithmetic as the decoder here: 8 cycles/bit without
+  unstuffing, store or CRC, against 76 cycles/byte with all three.
+
+## What the merge left open — the current front
+
+1. **Turnaround: 203..229 cycles, 12.7..14.3 bit times from SE0 to the C call.**
+   USB 2.0 §7.1.18 asks 6.5; the host timeout is 16-18. Inside what the host
+   tolerates, outside what the specification asks. This is a property of 24 MHz,
+   not of the merge. The answer already exists in the project as ACK-first
+   (`PRIOR_ART.md` R8, `doc/wg015/TODO.md` item 3), where it was explicitly
+   deferred *pending a measured turnaround*. That measurement now exists, so the
+   item is live.
+2. **No transmit.** The merged engine receives only. A 16-cycle TX bit cell is
+   unwritten. `NATIVE` sketched a hardware alternative worth evaluating:
+   output-compare toggle mode plus DMA is a hardware NRZI transmitter, because
+   NRZI *is* "toggle on 0" and the toggle list is always precomputable — zero
+   CPU cycles per bit, 26 cycles to arm. Its breakages are listed in
+   `engine16_native.md` and it does not exist on F002B.
+3. Phase lock is +/-3.5 cycles and unbenched; there is no mid-packet resync.
+4. 1812 B of RAM-resident code and tables, of which 512 B is the CRC16 table —
+   significant on a 3 KB part, and a candidate for trading back against cycles.
+
+## Integration status
+
+The engine and the six entries live in `doc/py32/` as design artifacts. They are
+**not yet integrated** into the port skeleton that `PLAN.md` §9 describes
+(`rv003usb/py32/`). §9's task T2 is substantially answered by the merge but its
+file ownership and acceptance criteria have not been reconciled with what the
+competition actually produced.
