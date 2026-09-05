@@ -43,6 +43,24 @@
  * RAM load.  This is load-bearing: from flash-resident code the rxbuf store
  * and both table lookups would cost 4 each and the pipeline would not fit.
  *
+ * Post-review repairs (ENGINE16_REVIEW.md F-1..F-5).  All of them are in the
+ * entry, the dispatch or the ISR tail; no bit cell changed, in either cost
+ * model.
+ *   F-1  every exit writes EXTI->PR.  Without it the pending flag stayed set,
+ *        the NVIC re-entered the handler at once, and the device live-locked
+ *        on the first D- edge.
+ *   F-2  the PID type dispatch runs BEFORE the length gate, so a handshake -
+ *        two emitted bytes, SYNC counted - reaches usb_pid_handle_ack.  Each
+ *        arm carries its own length test instead.
+ *   F-3  the token endpoint is bounded against ENDPOINTS before it indexes
+ *        ist->eps[], which is the last member of the struct.
+ *   F-4  the length argument is payload+3, the C layer's convention.
+ *   F-5  the store base is usb_rxbuf+2, so SYNC/PID land at +2/+3 and the
+ *        payload pointer handed to C is 4-aligned; the buffer is 2 bytes
+ *        longer so the masked index still cannot leave it.
+ *   Size: T_UT, T_CRC16 and T_CRC5 moved into the single table block in
+ *        engine16_tx.S - one T_CRC16 now serves both engines, -512 B.
+ *
  * Assembles with:
  *   arm-none-eabi-gcc -x assembler-with-cpp -mcpu=cortex-m0plus -mthumb -c
  */
@@ -50,6 +68,20 @@
 	.syntax unified
 	.cpu    cortex-m0plus
 	.thumb
+
+/* ENDPOINTS bounds the token endpoint before it indexes ist->eps[] (F-3).
+ * Take it from the project's own config when the build offers one - that is
+ * the only place it is authoritative, and the predecessor got it the same way
+ * (rv003usb-arm.S includes rv003usb.h) - and fall back to the value every
+ * usb_config.h in this tree carries so the file still assembles alone. */
+#if defined(__has_include)
+#if __has_include("usb_config.h")
+#include "usb_config.h"
+#endif
+#endif
+#ifndef ENDPOINTS
+#define ENDPOINTS       2
+#endif
 
 /* ------------------------------------------------------------------ port
  * PY32 GPIOB, IOPORT bus, 0x50000400 - BUILD_FACTS.md S7, identical on
@@ -70,10 +102,27 @@
 #endif
 #define USB_PINMASK     ((1 << USB_DP_BIT) | (1 << USB_DM_BIT))
 
-/* Receive buffer: 32 bytes, 32-byte aligned, index masked to 5 bits.  The
- * longest legal LS packet through this engine is SYNC + PID + 8 data +
- * CRC16 = 12 emitted bytes.  BALANCE's mechanism: the bound is a property of
- * the address arithmetic, not of a runtime check that could be wrong. */
+/* EXTI, for the pending-flag acknowledge every ISR exit owes the NVIC.  The
+ * flag is level-latched into the NVIC, so an ISR that returns without it is
+ * re-entered immediately and forever.  Base 0x40021800, PR at 0x0C, line =
+ * the D- pin: rv003usb-arm.S@0ad3c42:3,17,331-336, the immediate predecessor
+ * on this part.  (rv003usb.S:643-646 does the same on the RISC-V.) */
+#ifndef USB_EXTI_BASE
+#define USB_EXTI_BASE   0x40021800
+#endif
+#ifndef USB_EXTI_PR_OFS
+#define USB_EXTI_PR_OFS 0x0C
+#endif
+
+/* Receive buffer: index masked to 5 bits, so the store window is 32 bytes
+ * wide wherever the base points.  The longest legal LS packet through this
+ * engine is SYNC + PID + 8 data + CRC16 = 12 emitted bytes.  BALANCE's
+ * mechanism: the bound is a property of the address arithmetic, not of a
+ * runtime check that could be wrong - so the ALLOCATION, not the mask, is
+ * what absorbs the +2 payload-alignment bias (F-5).  Base = usb_rxbuf+2 and
+ * the masked index is 0..31, so the window is usb_rxbuf+2 .. usb_rxbuf+33
+ * and the buffer is USB_RXBUF_LEN + 2 bytes.  No store can leave it for any
+ * input whatever, which is the property the mask was chosen for. */
 #define USB_RXBUF_LEN   32
 #define USB_RXBUF_MASK  27		/* shift pair: 32 - log2(len) */
 /* Loop/packet bound: the chain is a loop, so termination needs a runtime
@@ -81,10 +130,21 @@
  * bounded twice over: structurally by the mask, and by this. */
 #define USB_BYTE_LIMIT  24
 
-/* Table offsets inside the single base held in r4. */
+/* Table offsets inside the single base held in r4.  The block itself is in
+ * engine16_tx.S - see the note where the tables used to be - and asserts
+ * these three offsets there.  T_CRC16 must stay <= 512 for SEG4's index
+ * arithmetic and T_CRC5 a whole multiple of 256 for .Lcrc5_byte's. */
 #define T_UT            0		/* 128 halfwords: unstuff + accumulate */
-#define T_CRC16         256		/* 256 halfwords: CRC16 byte step      */
-#define T_CRC5          768		/*  16 halfwords: CRC5 nibble step     */
+#define T_CRC16         512		/* 256 halfwords: SHARED with the TX   */
+					/* engine, which sees the same table   */
+					/* at its own base + 256               */
+#define T_CRC5          1024		/*  16 halfwords: CRC5 nibble step     */
+	.if     (T_CRC16 / 2 - 1) > 255 || (T_CRC16 & 1)
+	.error  "engine16_merged: T_CRC16 does not fit SEG4's index arithmetic"
+	.endif
+	.if     ((T_CRC5 >> 8) << 8) != T_CRC5 || (T_CRC5 >> 8) > 255
+	.error  "engine16_merged: T_CRC5 does not fit .Lcrc5_byte's index"
+	.endif
 
 /* ------------------------------------------------- cycle-accounting macros
  * The ledger is assembled, not asserted: CELL pads the cell that is running
@@ -193,9 +253,9 @@ usb_rx_cell\idx:
 	mov     r2, r10			/* 1  running CRC                     */
 	eors    r2, r3			/* 1  crc ^ candidate byte            */
 	uxtb    r2, r2			/* 1                                  */
-	lsls    r2, r2, #1		/* 1  halfword index                  */
-	adds    r2, #(T_CRC16 / 2)	/* 1  \ ADDS takes imm8; T_CRC16=256  */
-	adds    r2, #(T_CRC16 / 2)	/* 1  /                               */
+	adds    r2, #(T_CRC16 / 2 - 1)	/* 1  \ index*2 + T_CRC16, in three  */
+	lsls    r2, r2, #1		/* 1   | instructions for any even     */
+	adds    r2, #2			/* 1  /  T_CRC16 <= 512 (imm8 is 255) */
 	ldrh    r2, [r4, r2]		/* 2                                  */
 	mov     r8, r2			/* 1  park; the commit is decided late*/
 	.endm
@@ -274,6 +334,9 @@ usb_rx_engine16:
 	bne     1f
 	.global usb_rx_keepalive
 usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
+	ldr     r0, =USB_EXTI_BASE	/* acknowledge, or the NVIC re-enters*/
+	movs    r1, #(1 << USB_DM_BIT)
+	str     r1, [r0, #USB_EXTI_PR_OFS]
 	bx      lr
 1:
 	push    {r4-r7, lr}
@@ -289,8 +352,11 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
 	mov     r7, r3			/* r7 = GPIO base                    */
 	movs    r6, #USB_PINMASK	/* r6 = D+|D- mask (DESCENT)         */
 	ldr     r4, =usb_tables		/* r4 = table base                   */
-	ldr     r2, =usb_rxbuf
-	mov     r9, r2
+	ldr     r2, =(usb_rxbuf + 2)	/* F-5: SYNC at rxbuf+2, PID at +3,  */
+	mov     r9, r2			/* payload at +4, i.e. 4-ALIGNED.    */
+					/* The C layer does plain uint32_t   */
+					/* loads through this pointer and    */
+					/* ARMv6-M has no unaligned access.  */
 	ldr     r2, =(usb_rx_chain + 1)	/* chain head, bit0 set for bx       */
 	mov     r14, r2
 	movs    r2, #0
@@ -363,7 +429,11 @@ rx_eop3:	movs    r2, #5
 
 /* Confirmed.  The first PID cell starts at t0 + 32, so its centre is
  * t0 + 40 = confirming sample + 16.  ldr + lsls + untaken bpl = 3, so the
- * priming below must be exactly 13 cycles: 9 of setup, 4 of nop.
+ * priming below is 14 cycles: 9 of setup, 5 of nop - which is what the code
+ * does and what the assertion at usb_rx_chain enforces (F-9: this comment
+ * used to say 13/4 and contradict both).  14 puts the first sample half a
+ * cycle after the cell centre instead of half a cycle before; the poll
+ * granularity already contributes +-3.5.
  *
  * The pipeline is primed with the one wire byte we already know - SYNC
  * itself.  SYNC decodes to 0,0,0,0,0,0,0,1 oldest-first, i.e. 0x80 as a USB
@@ -498,8 +568,8 @@ rx_flush7:
 
 	mov     r6, r9			/* rxbuf base                        */
 	mov     r0, r12			/* emitted byte count                */
-	cmp     r0, #4			/* SYNC + PID + at least two more    */
-	blo     .Lusb_done
+	cmp     r0, #2			/* SYNC + PID: a handshake is exactly*/
+	blo     .Lusb_done		/* this and must reach the dispatch  */
 	cmp     r0, #12			/* longer than any legal LS packet   */
 	bhi     .Lusb_done
 
@@ -515,6 +585,12 @@ rx_flush7:
 	cmp     r1, #0x0F
 	bne     .Lusb_done
 
+	/* Dispatch on the PID type BEFORE any length constraint: a handshake
+	 * is SYNC + PID + EOP, i.e. two emitted bytes, and the old
+	 * "cmp r0,#4 / blo" rejected it here, which made .Lhandshake and
+	 * usb_pid_handle_ack dead code and froze the IN data toggle.  Each arm
+	 * now carries the length it needs: token == 4, data 4..12, handshake
+	 * == 2. */
 	movs    r1, #3
 	ands    r1, r5			/* PID type field                    */
 	cmp     r1, #3
@@ -529,12 +605,19 @@ rx_flush7:
  * residue is left.  0xB001 is the reflected-CRC16 residue over message+CRC
  * (verified numerically here, and the same constant rv003usb.S:519 uses). */
 .Ldata:
+	cmp     r0, #4			/* SYNC + PID + CRC16 at least       */
+	blo     .Lusb_done
 	mov     r1, r10
 	ldr     r2, =0x0000B001
 	cmp     r1, r2
 	bne     .Lusb_done
-	subs    r3, r0, #4		/* payload length: -SYNC -PID -CRC16 */
-	adds    r1, r6, #2		/* payload pointer                   */
+	subs    r3, r0, #1		/* F-4: the C layer's convention is  */
+					/* payload + 3 (rv003usb.c:300 does  */
+					/* length -= 3), and the count here  */
+					/* is payload + 4.  Passing the bare */
+					/* payload length made a ZLP arrive  */
+					/* as 0xFFFFFFFD.                    */
+	adds    r1, r6, #2		/* payload pointer, 4-aligned (F-5)  */
 	lsrs    r2, r5, #3
 	movs    r0, #1
 	ands    r2, r0			/* DATA1 -> which_data = 1           */
@@ -564,6 +647,12 @@ rx_flush7:
 	lsls    r1, r1, #29
 	lsrs    r1, r1, #28		/* endp bits 3:1                     */
 	orrs    r2, r1			/* r2 = endpoint                     */
+	cmp     r2, #ENDPOINTS		/* eps[] is the LAST member of the   */
+	bhs     .Lusb_done		/* struct: an unchecked 0..15 from   */
+					/* the wire writes past it.  BHS,    */
+					/* not BHI - that is catalogue U-1,  */
+					/* repaired (rv003usb.S:528 is the   */
+					/* correct predecessor).             */
 	movs    r1, #0x7F
 	ands    r0, r1			/* r0 = address                      */
 	adds    r1, r6, #2		/* data pointer                      */
@@ -594,6 +683,8 @@ rx_flush7:
 	b       .Lusb_done
 
 .Lhandshake:
+	cmp     r0, #2			/* SYNC + PID + EOP and nothing else */
+	bne     .Lusb_done
 	adds    r1, r6, #2
 	movs    r0, #0
 	movs    r2, #0
@@ -637,6 +728,14 @@ rx_flush7:
 	b       .Lusb_done
 
 .Lusb_done:
+	/* Acknowledge last, not first: our own transmission has toggled D- by
+	 * now and set the flag again, so clearing here is what makes the ISR
+	 * run once per packet - the predecessor's interrupt_complete does the
+	 * same.  Every exit from this engine is either here or the keepalive
+	 * bx lr above; both clear it. */
+	ldr     r0, =USB_EXTI_BASE
+	movs    r1, #(1 << USB_DM_BIT)
+	str     r1, [r0, #USB_EXTI_PR_OFS]
 	pop     {r4-r7}
 	mov     r8, r4
 	mov     r9, r5
@@ -648,80 +747,27 @@ rx_flush7:
 	.ltorg
 
 /* ============================== tables ===================================
- * Generated and verified by the script in engine16_merged.md, which also
- * re-derives VUSB's T_UT independently (128/128 entries matched) and
- * confirms both CRC residues numerically.  They live in the same
- * RAM-resident section as the code, so `ldrh rd,[r4,rn]` is a 2-cycle RAM
- * load; from flash they would cost 4 and the pipeline would not fit.
+ * The tables are NOT here.  Both engines need a CRC16 byte table and it is
+ * the same 512-byte table, so there is one copy, in engine16_tx.S, inside a
+ * single block that both engines index off their own base:
+ *
+ *   usb_tables + 0     T_UT        256 B   receive: unstuff + accumulate
+ *   usb_tables + 256   usb_tx_tables       transmit: dispatch + T_TX
+ *   usb_tables + 512   T_CRC16     512 B   SHARED, and +256 from usb_tx_tables
+ *   usb_tables + 1024  T_CRC5       32 B   receive: token CRC5
+ *
+ * Neither engine can hold the shared copy at a link-time-unknown offset -
+ * every timed table access is `ldrh rd,[base,rn]` with the base pinned by
+ * SEG1 (r4+0 for T_UT) and by TXSEG4, and no register is free for a second
+ * base - so the two 256-byte prefixes have to be one block, and the block
+ * lives in one file.  The offsets above are asserted there, at assembly
+ * time.  The generators that produce every entry are in the same place, with
+ * the data.
  */
-	.balign 4
-	.global usb_tables
-usb_tables:
-	/* T_UT: 8 unstuff states x 16 wire nibbles.
-	 * halfword = m<<11 | n<<8 | newstate<<5, m = kept_bits + 2^n - 1.
-	 * Row 7 is the sticky stuffing-violation row.  It differs from VUSB's:
-	 * it KEEPS its four bits (n=4) instead of emitting nothing, so that the
-	 * emitted-byte counter keeps advancing and SEG5's bound terminates the
-	 * chain.  With VUSB's n=0 row the counter freezes and a bus stuck in a
-	 * violation spins the ISR forever - see the .md, "the hang". */
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0xb400, 0xf480
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0xb400, 0xf4a0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0xb400, 0xf4c0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0x7300, 0x00e0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x5300, 0x7320, 0x00e0, 0x00e0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x4300, 0x6320, 0x5300, 0x7340, 0x00e0, 0x00e0, 0x00e0, 0x00e0
-	.hword	0x3b00, 0x5b20, 0x4b00, 0x6b40, 0x4300, 0x6320, 0x5300, 0x7360
-	.hword	0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0
-	.hword	0x7ce0, 0xbce0, 0x9ce0, 0xdce0, 0x8ce0, 0xcce0, 0xace0, 0xece0
-	.hword	0x84e0, 0xc4e0, 0xa4e0, 0xe4e0, 0x94e0, 0xd4e0, 0xb4e0, 0xf4e0
-
-	/* T_CRC16: crc = (crc>>8) ^ T[(crc^byte)&0xFF], reflected 0xA001 */
-	.hword	0x0000, 0xc0c1, 0xc181, 0x0140, 0xc301, 0x03c0, 0x0280, 0xc241
-	.hword	0xc601, 0x06c0, 0x0780, 0xc741, 0x0500, 0xc5c1, 0xc481, 0x0440
-	.hword	0xcc01, 0x0cc0, 0x0d80, 0xcd41, 0x0f00, 0xcfc1, 0xce81, 0x0e40
-	.hword	0x0a00, 0xcac1, 0xcb81, 0x0b40, 0xc901, 0x09c0, 0x0880, 0xc841
-	.hword	0xd801, 0x18c0, 0x1980, 0xd941, 0x1b00, 0xdbc1, 0xda81, 0x1a40
-	.hword	0x1e00, 0xdec1, 0xdf81, 0x1f40, 0xdd01, 0x1dc0, 0x1c80, 0xdc41
-	.hword	0x1400, 0xd4c1, 0xd581, 0x1540, 0xd701, 0x17c0, 0x1680, 0xd641
-	.hword	0xd201, 0x12c0, 0x1380, 0xd341, 0x1100, 0xd1c1, 0xd081, 0x1040
-	.hword	0xf001, 0x30c0, 0x3180, 0xf141, 0x3300, 0xf3c1, 0xf281, 0x3240
-	.hword	0x3600, 0xf6c1, 0xf781, 0x3740, 0xf501, 0x35c0, 0x3480, 0xf441
-	.hword	0x3c00, 0xfcc1, 0xfd81, 0x3d40, 0xff01, 0x3fc0, 0x3e80, 0xfe41
-	.hword	0xfa01, 0x3ac0, 0x3b80, 0xfb41, 0x3900, 0xf9c1, 0xf881, 0x3840
-	.hword	0x2800, 0xe8c1, 0xe981, 0x2940, 0xeb01, 0x2bc0, 0x2a80, 0xea41
-	.hword	0xee01, 0x2ec0, 0x2f80, 0xef41, 0x2d00, 0xedc1, 0xec81, 0x2c40
-	.hword	0xe401, 0x24c0, 0x2580, 0xe541, 0x2700, 0xe7c1, 0xe681, 0x2640
-	.hword	0x2200, 0xe2c1, 0xe381, 0x2340, 0xe101, 0x21c0, 0x2080, 0xe041
-	.hword	0xa001, 0x60c0, 0x6180, 0xa141, 0x6300, 0xa3c1, 0xa281, 0x6240
-	.hword	0x6600, 0xa6c1, 0xa781, 0x6740, 0xa501, 0x65c0, 0x6480, 0xa441
-	.hword	0x6c00, 0xacc1, 0xad81, 0x6d40, 0xaf01, 0x6fc0, 0x6e80, 0xae41
-	.hword	0xaa01, 0x6ac0, 0x6b80, 0xab41, 0x6900, 0xa9c1, 0xa881, 0x6840
-	.hword	0x7800, 0xb8c1, 0xb981, 0x7940, 0xbb01, 0x7bc0, 0x7a80, 0xba41
-	.hword	0xbe01, 0x7ec0, 0x7f80, 0xbf41, 0x7d00, 0xbdc1, 0xbc81, 0x7c40
-	.hword	0xb401, 0x74c0, 0x7580, 0xb541, 0x7700, 0xb7c1, 0xb681, 0x7640
-	.hword	0x7200, 0xb2c1, 0xb381, 0x7340, 0xb101, 0x71c0, 0x7080, 0xb041
-	.hword	0x5000, 0x90c1, 0x9181, 0x5140, 0x9301, 0x53c0, 0x5280, 0x9241
-	.hword	0x9601, 0x56c0, 0x5780, 0x9741, 0x5500, 0x95c1, 0x9481, 0x5440
-	.hword	0x9c01, 0x5cc0, 0x5d80, 0x9d41, 0x5f00, 0x9fc1, 0x9e81, 0x5e40
-	.hword	0x5a00, 0x9ac1, 0x9b81, 0x5b40, 0x9901, 0x59c0, 0x5880, 0x9841
-	.hword	0x8801, 0x48c0, 0x4980, 0x8941, 0x4b00, 0x8bc1, 0x8a81, 0x4a40
-	.hword	0x4e00, 0x8ec1, 0x8f81, 0x4f40, 0x8d01, 0x4dc0, 0x4c80, 0x8c41
-	.hword	0x4400, 0x84c1, 0x8581, 0x4540, 0x8701, 0x47c0, 0x4680, 0x8641
-	.hword	0x8201, 0x42c0, 0x4380, 0x8341, 0x4100, 0x81c1, 0x8081, 0x4040
-
-	/* T_CRC5: crc = (crc>>4) ^ T[(crc^nibble)&0xF], reflected 0x14 */
-	.hword	0x0000, 0x0016, 0x0005, 0x0013, 0x000a, 0x001c, 0x000f, 0x0019
-	.hword	0x0014, 0x0002, 0x0011, 0x0007, 0x001e, 0x0008, 0x001b, 0x000d
-
-
 	.section .bss.usb_rxbuf, "aw", %nobits
-	.balign USB_RXBUF_LEN		/* the mask in SEG3 assumes this */
+	.balign USB_RXBUF_LEN		/* +2 is then 2 mod 4 and +4 is word-
+					 * aligned, which is what the C layer
+					 * requires of the payload pointer */
 	.global usb_rxbuf
 usb_rxbuf:
-	.space  USB_RXBUF_LEN
+	.space  USB_RXBUF_LEN + 2	/* +2: see the note at USB_RXBUF_LEN */
