@@ -298,6 +298,62 @@ register for mask arithmetic, traced the alternative by hand, and found that
 doing so only moves the cost onto the already-tightest path. That is exactly the
 archaeology the control experiment existed to produce.
 
+## BALANCE (own design) — HONEST MISS ON CYCLES, GENUINE MECHANISM
+
+Files: `engine16_balance.S` (124 lines), `engine16_balance.md` (486). Assembles
+rc=0. RAM-resident, correct PY32 base 0x50000400.
+
+**Self-reported as not fitting: 17-18 cycles on an ordinary bit, 34 at the byte
+boundary. Checked, and the self-report is exactly right** — 15 single-cycle
+instructions plus a taken loop-back branch at 2-3 gives 17..18. It declared the
+miss rather than padding a ledger to hide it, which is worth more than a
+borderline pass would have been.
+
+**Its mechanism is real and I verified the arithmetic.** One transition mask in
+r6, computed with `lsls #25` / `asrs #31`, then consumed **three** ways:
+
+```
+eors r6, r2      NRZI delta against previous sample
+eors r2, r6      prev := new
+bics r4, r6      bit-stuffing counter update, driven by the same mask
+lsrs r6, r6, #31 mask -> carry
+adcs r3, r3      byte insertion via the carry chain
+```
+
+Full branchlessness on the value decode for **4 extra instructions** over a
+minimal branch-based core. That directly contradicts GRAINUUM's own recorded
+finding that a comparable branchless treatment costs 9-12 extra instructions and
+is not worth it — and the listing above is the evidence, so this is a
+disagreement settled by code rather than by opinion.
+
+**Why it misses, and the number that matters for the merge.** The cost is not in
+the core, it is in the packaging: `subs r5,#1` + `beq byte_boundary` + `b bit_cell`
+is 4-5 cycles of per-bit loop overhead. Those are exactly the instructions that
+per-byte unrolling deletes. BALANCE computed, without building it, that its core
+placed in an unrolled structure would leave **3 cycles of slack per slot**. I
+checked: removing those three instructions from 17..18 gives 13, and 16-13 = 3.
+The claim is consistent.
+
+So this entry is a core without a chassis, and it says so.
+
+## The convergent finding — four entrants, three derivations
+
+Per-byte unrolling is not one entrant's idea. It arrived independently from
+three directions, and a fourth computed its value without building it:
+
+* GRAINUUM designed it to make the buffer bound structural.
+* DESCENT derived it from the reference engine's own arithmetic — a shared
+  byte-boundary handler inherits only 1-4 cycles of its caller's remaining
+  budget while a byte store needs 7, so "which byte" must become a compile-time
+  fact. This is a proof, not a preference.
+* VUSB arrived at it from the AVR school, as eight cells `usb_rx_cell0..7`.
+* BALANCE quantified what its own core would gain from it.
+
+Meanwhile CLEANSHEET established the limit of the idea: unrolling *a whole
+packet* does not help, because a short conditional branch cannot reach far
+enough to keep an SE0 escape in range. So the right granularity is one byte, and
+that is now established from four directions rather than asserted.
+
 ## Scoreboard so far
 
 | entrant | state | bit cell | branch-ambiguity exposure |
@@ -307,7 +363,7 @@ archaeology the control experiment existed to produce.
 | GRAINUUM | complete | 15..16 / 14..16 | every path, 1-2 cycles |
 | NATIVE | complete | n/a — peripheral, mostly negative | n/a |
 | DESCENT | complete, one-line defect | 15..16 once fixed | every path, after the fix |
-| BALANCE | lost | — | — |
+| BALANCE | complete, honest miss | 17..18 | 1 branch, in the loop overhead |
 
 DESCENT (compression of the existing engine), VUSB (AVR school), GRAINUUM (ARM
 school, owns entry/phase/boundaries), BALANCE (own design, may look at the
