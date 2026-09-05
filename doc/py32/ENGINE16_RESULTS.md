@@ -175,7 +175,88 @@ preprocessor is exposed to this.
 constants are first-order estimates, not bench-verified — the same status
 `PRIOR_ART.md` records for the reference engine's own constants.
 
-## Still running
+## VUSB (AVR school) — DIED, BUT ITS ENGINE SURVIVED AND VERIFIES
+
+Killed by a model session limit before writing its design note. `engine16_vusb.S`
+(659 lines) was committed in its worktree and is intact. No `.md`, so the
+reasoning behind it is lost — only the code speaks.
+
+**Its own commit message claimed** "every bit cell measures exactly 16 cycles".
+**Checked, and it holds** — in the RAM column. The cell:
+
+```
+ldr  r2, [r7, #IDR]    1    IOPORT
+ands r2, r6            1
+beq  usb_rx_eopN       1    not taken on the common path; taken only to leave
+lsrs r2, r2, #3        1
+adcs r5, r5            1    carry-chain capture, same idea CLEANSHEET found
+lsls r1, r1, #1        1
+mov  r2, fp            1
+orrs r1, r2            1
+ldrh r1, [r4, r1]      2    <- register-offset TABLE LOOKUP, RAM
+uxtb r2, r1            1
+mov  fp, r2            1
+nop x4                 4
+                      ==16
+```
+
+**This is the strongest result so far on spec §6 criterion 3.** The cell is
+*exactly* 16 with no ambiguous branch anywhere on the data path — the only `beq`
+is not-taken on the common path and, when taken, exits the cell to EOP handling.
+Where CLEANSHEET is exact for 7 bits in 8 and GRAINUUM carries a 1-2 cycle
+spread on every path, this carries none at all.
+
+The mechanism doing the work is `ldrh r1, [r4, r1]` — a **register-offset table
+lookup**, feeding a state variable held in `fp`. That is the AVR school's
+table-driven decode, re-derived on the one M0+ addressing mode that makes it
+possible (`M0PLUS_ISA_FACTS.md`). It folds NRZI decode, the stuffing counter and
+the byte assembly into one memory access, which is how a branch disappears
+rather than being replaced by mask arithmetic. It also explains the unrolling:
+eight cells, `usb_rx_cell0..7`, one per bit of the byte.
+
+**Transliteration artifact, and exactly the hazard the owner named:** the file
+defaults `USB_GPIO_BASE` to **0x48000000**, which is the STM32 GPIO base. On
+PY32 it is 0x50000000 (`BUILD_FACTS.md` §7). It sits behind an `#ifndef` so it
+is overridable, but the default is wrong for the part this competition targets,
+and it is the kind of constant that would be corrected late and painfully. Worth
+recording as evidence that the hazard is real, not hypothetical.
+
+**What is missing and cannot be recovered:** how it reconciles unrolling with
+bit stuffing — the hard part of this lineage, and the thing its brief singled
+out. The table presumably carries it, but without the note the table's
+construction has to be reverse-engineered from `.S` before the mechanism can be
+reused. Its last recorded action was "update the model to the shift+sentinel
+scheme and re-verify", so the committed file may predate a change it intended.
+
+## DESCENT — TOTAL LOSS, AND THE CAUSE IS INSTRUCTIVE
+
+Nothing on disk, no commits. It died on its **first turn**, not to a rate limit
+but to `max_output_tokens`: it exceeded the 64000-token output ceiling in a
+single response. It had said only "I'll start by getting the documents".
+
+So this was not bad luck, it was a method failure: the agent attempted to emit a
+very large artifact in one response instead of building it incrementally. Every
+other entrant wrote its file in pieces and committed as it went, and every other
+entrant that died still left something usable. The durability instruction in the
+briefs said to commit early and often; it needs to also say to **write in
+pieces**, because a single oversized write can fail before the first commit ever
+happens.
+
+## BALANCE — TOTAL LOSS
+
+Imported the shared docs and the cycle tool, then died on a model session limit
+before writing any engine. One commit, containing only the import.
+
+## Scoreboard so far
+
+| entrant | state | bit cell | branch-ambiguity exposure |
+|---|---|---|---|
+| VUSB | engine only, no note | **exactly 16** | none on the data path |
+| CLEANSHEET | complete | 16 for 7 bits in 8 | only at the byte boundary |
+| GRAINUUM | complete | 15..16 / 14..16 | every path, 1-2 cycles |
+| NATIVE | complete | n/a — peripheral, mostly negative | n/a |
+| DESCENT | lost | — | — |
+| BALANCE | lost | — | — |
 
 DESCENT (compression of the existing engine), VUSB (AVR school), GRAINUUM (ARM
 school, owns entry/phase/boundaries), BALANCE (own design, may look at the
