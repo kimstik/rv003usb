@@ -368,3 +368,115 @@ that is now established from four directions rather than asserted.
 DESCENT (compression of the existing engine), VUSB (AVR school), GRAINUUM (ARM
 school, owns entry/phase/boundaries), BALANCE (own design, may look at the
 others but may not repeat them).
+
+
+# THE MERGE — verified
+
+`engine16_merged.S` (727 lines), `engine16_merged.md` (579). Assembles rc=0.
+
+**Exactly 16 cycles on every data path — independently confirmed.** All eight
+cells measure a minimum of 16 with the annotator (`--exec ram --ioport r7`); the
+18-20 maxima are EOP exits, which leave the cell. Cell 0-6 are 13 instructions
+plus 3 padding; cell 7 is 13 instructions plus `bx lr` at 3.
+
+The cell:
+
+```
+ldr  r2, [r7, #IDR]   1    combined D+/D- read (DESCENT)
+ands r2, r6           1    ...and mask: SE0 falls out free
+beq  rx_eopN          1    not taken on the data path
+lsrs r2, r2, #4       1
+adcs r5, r5           1    carry-chain capture (CLEANSHEET)
+lsls r1, r1, #1       1
+mov  r2, fp           1
+orrs r1, r2           1
+ldrh r1, [r4, r1]     2    register-offset table (VUSB)
+uxtb r2, r1           1
+mov  fp, r2           1
+nop x4                4
+                     ==16
+```
+
+**Fall-through is correct here, unlike in DESCENT.** Cells 0-6 end with no
+branch and fall into the next cell, which is right because they are laid out
+consecutively — that is what an unrolled sequence *is*. DESCENT's fall-through
+was a defect because it landed in the handler for the other bit value. Checked
+in raw `objdump`: cell0 ends at 0xc8, cell1 begins at 0xca. Contiguous.
+
+**Zero branch-ambiguity exposure on timed paths.** Eight not-taken `beq` at 1
+cycle each, and one `bx` per wire byte. Exact without any new measurement,
+conditional on `bx` = 3 — which both cost sources give as a flat 3, unlike `b`
+which they price at 2-3. If the bench disagrees, cell 7 becomes 15..16 and the
+repair is one `nop`.
+
+**Relocations: nine, all legitimate.** Four `R_ARM_ABS32` for data addresses and
+five `R_ARM_THM_CALL` for the C-layer seam. **No branch relocations at all** —
+the referee made every branch target local, so the assembler proves each range
+rather than deferring it to the linker. That is a real improvement over the
+entries and it closes a class of defect nobody had been checking for.
+
+## What came from whom
+
+| mechanism | from | why it won |
+|---|---|---|
+| wire-domain unroll, one-byte-behind pipeline, register-offset table, biased-add accumulator | VUSB | the only route to exactness with no branch on the data value |
+| combined D+/D- sample-and-mask; correct base 0x50000400 | DESCENT | SE0 detection free from the read that does the NRZI test |
+| carry-chain `adcs` capture | CLEANSHEET | cheapest capture; its branch-range negative result also fixes the chain at one byte |
+| per-byte unroll as the granularity | GRAINUUM | established from four directions |
+| structural buffer bound: power-of-two buffer, masked index, register-offset store | BALANCE | 2 cycles, closes D-2 by construction |
+
+**VUSB's table was reverse-engineered and verified 128/128 against an
+independent model before reuse** — the work its lost design note made necessary,
+and the highest-value hour of the merge.
+
+## What was rejected, with reasons
+
+* **BALANCE's fused mask as the decoder** — 8 cycles/bit without unstuffing,
+  store or CRC, against 76 cycles/byte with all three from the table. The table
+  subsumes it. This settles the direct competition between the two.
+* **CLEANSHEET's deferred decode** — 700+ cycles after EOP is 45+ bit times
+  against a 2-6.5 bit-time window.
+* **CLEANSHEET's push/pop padding** — depends on the flash column; the merged
+  engine is RAM-resident.
+* **GRAINUUM's full-buffer unroll** — 2.9 KB on a 3 KB part.
+* **NATIVE's peripherals** — F002B has neither TIM3 nor DMA and the software
+  path must stand alone.
+
+## Defects the merge found in the entries
+
+* VUSB's STM32 base 0x48000000.
+* VUSB's priming inconsistent with its own accumulator: `r0` = 2 with the
+  sentinel at bit 24, and `r8` never initialised.
+* **VUSB's ISR hangs forever** on a bus stuck in a stuffing violation — its
+  row 7 emits nothing, so its bound can never fire. Repaired by making row 7
+  keep its bits.
+* VUSB's last cell was never budget-checked.
+* One fall-through of the referee's own, into `rx_eop0`, caught in raw
+  `objdump` rather than by the tool.
+
+## The honest limitation, and it is the real remaining problem
+
+**Turnaround is 203..229 cycles, about 12.7..14.3 bit times from SE0 to the C
+call.** USB 2.0 §7.1.18 wants 6.5; the host timeout is 16-18. So the engine is
+inside what the host will tolerate but outside what the specification asks.
+
+This is a property of 24 MHz, not of the merge — half the clock is half the
+turnaround budget in cycles. The project's answer already exists: ACK-first,
+recorded as R8 in `PRIOR_ART.md` and as item 3 in `doc/wg015/TODO.md`, where it
+was deferred pending a measured turnaround. It is no longer deferred — this is
+the measurement that triggers it.
+
+Also given up and stated: 1812 B of RAM-resident code and tables (the 512 B
+CRC16 table is the price of a 2-cycle lookup, significant on a 3 KB part);
+phase lock ±3.5 cycles, unbenched; no mid-packet resync; no transmit.
+
+## Semantics, verified rather than argued
+
+A bit-exact model of the `.S` decodes 305 host-encoded packets — empty,
+all-zero maximum-stuffing, all-ones, DATA0/DATA1 and 300 random — with zero
+failures and CRC residue 0xB001 every time. Both residues (0xB001, 0x06)
+confirmed numerically. The tables embedded in the `.S` were compared
+halfword-for-halfword against their generator, 400/400.
+
+That is a stronger standard of evidence than any individual entry reached, and
+it is the right one for code that will be trusted to be cycle-exact.
