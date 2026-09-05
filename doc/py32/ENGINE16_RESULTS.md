@@ -111,6 +111,70 @@ precomputable. Its bit cell costs zero CPU cycles and 26 cycles to arm, against
 51 for "entry to first preamble store" today. Sketched with its breakages listed
 (RAM cost, pin alternate-function conflict, SE0).
 
+## GRAINUUM (ARM Cortex-M school) — CLAIM TRUE AS STATED, BUT READ THE SPREAD
+
+Files: `engine16_grainuum.S` (394 lines), `engine16_grainuum.md` (592).
+Assembles rc=0. **RAM-resident** — the opposite placement choice from CLEANSHEET,
+which makes the pair a useful controlled comparison.
+
+**Claimed:** 16 cycles worst case on every ledgered path, under a conservative
+assumption that every ambiguous taken branch costs 3.
+
+**Checked, and it is true as stated.** The block totals my annotator prints
+(18..24 for a slot) do *not* refute it — a bit cell here is a path that branches
+out and back, and the tool deliberately does not resolve control flow. Tracing
+the paths by hand:
+
+*Data-0 (fall-through):* `ldr`+`ands`+`eors` 3, `beq` not taken 1, `eors` 1,
+`beq` not taken 1, `lsrs`+`movs` 2, 5x`nop` 5, `b` taken 2-3 → **15..16**.
+
+*Data-1 (branch out and back):* 3 + `beq` taken 2-3 + `lsrs`+`adds`+`subs` 3 +
+`beq` not taken 1 + 3x`nop` 3 + `b` taken 2-3 → **14..16**.
+
+So worst case is 16 on both, as claimed. But **every path here carries the
+branch ambiguity**, with a spread of 1 cycle on data-0 and 2 on data-1, whereas
+CLEANSHEET's ordinary slot is *exactly* 16 with no ambiguous branch in it at
+all, and pays the exposure only once per byte.
+
+On spec §6 criterion 3 — robustness to the 2-vs-3 ambiguity — that is a clear
+difference between the two entries, and it is the kind of thing that only shows
+up when the paths are traced rather than the claims compared. It does not make
+GRAINUUM wrong; it means its exactness is contingent on a number nobody has
+measured yet.
+
+**Project-level consequence, common to both entries:** the branch cost is not
+run-to-run randomness, it is an unknown constant of the part. Once measured on
+silicon, either design is made exact by inserting one `nop`. Both entrants
+independently arrived at that same conclusion and both flagged it rather than
+hiding it. **This makes "measure the taken-branch cost" the single highest-value
+bench item in the whole project** — it is now on the critical path for every
+software engine, not a detail.
+
+**Mechanism it offers:** the static per-byte unroll, which turns the receive
+buffer bound into a structural property — no instruction in the object can
+address the buffer out of range, because every exit of the last unrolled block
+goes to an abort handler and never back into the engine. That closes
+`DEFECTS_VERIFIED.md` D-2 with no runtime check and therefore no cycles, which
+is the difficulty that made D-2 a design task rather than a one-liner. It is a
+statement about code layout rather than about how a bit is sampled, so it
+composes with any other entrant's inner loop.
+
+**No contradiction with CLEANSHEET's negative result**, despite appearances:
+CLEANSHEET showed that unrolling *the whole packet* fails to remove recurring
+taken branches, because a short conditional branch cannot reach far enough.
+GRAINUUM unrolls *one byte*, eight slots, and keeps a loop around it. Different
+claims, both true.
+
+**Bug found and fixed in flight, worth recording:** a stray line-continuation
+backslash inside an ASCII-art comment silently swallowed a `nop` through
+C-preprocessor line splicing, leaving one path a cycle short. It was caught by
+`objdump`, not by reading. Anything in this project that runs a `.S` through the
+preprocessor is exposed to this.
+
+**Honest limitation the entrant declares:** the entry and phase-lock delay
+constants are first-order estimates, not bench-verified — the same status
+`PRIOR_ART.md` records for the reference engine's own constants.
+
 ## Still running
 
 DESCENT (compression of the existing engine), VUSB (AVR school), GRAINUUM (ARM
