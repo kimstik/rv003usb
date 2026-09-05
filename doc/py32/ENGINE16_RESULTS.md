@@ -247,6 +247,57 @@ happens.
 Imported the shared docs and the cycle tool, then died on a model session limit
 before writing any engine. One commit, containing only the import.
 
+## DESCENT (retry, direct descent) — REAL DEFECT FOUND; CLAIM DOES NOT SURVIVE THE FIX
+
+Files: `engine16_descent.S` (222 lines), `engine16_descent.md` (494). Assembles
+rc=0. RAM-resident, and it uses the **correct** PY32 GPIO base 0x50000400 —
+unlike VUSB, which defaults to the STM32 base.
+
+**Claimed:** exactly 16 cycles on every ledgered path.
+
+**The data-0 path does not do what the ledger says.** Confirmed in raw
+`objdump`, not only through the annotator: `byte0_bit1` ends at 0x48 with a
+`nop` and **no branch**, so the data-0 path falls straight through into
+`byte0_bit1_one` at 0x4a, which executes `lsrs r4, r4, #1` a second time and
+then `orrs r4, r2`. Every received 0 bit would be shifted twice and have bit 7
+set. The path also does not end at 16 cycles — it runs on into the next handler.
+
+The cause is visible in the source and is a copy-divergence slip rather than a
+design error. There are two cell macros. `RX_BIT_LAST` ends its data-0 path
+correctly with `b \next`. `RX_BIT_PLAIN` — used for bits 1-7 of every byte —
+does not; it has `.rept 8 / nop / .endr` where the branch should be, and then
+runs into the `_one` label. The author wrote the pattern correctly once and
+dropped the branch in the other copy.
+
+**The fix costs the claim.** Restoring `b \next` means the data-0 path becomes
+8 real cycles + N nops + a taken branch at 2-3. To reach 16 that is 5 nops,
+giving **15..16** — the same branch-ambiguity exposure GRAINUUM carries, not the
+exactness DESCENT claimed. So corrected, this entry sits with GRAINUUM rather
+than with VUSB and CLEANSHEET.
+
+None of that invalidates its analysis, which is where its real value is (below).
+It is a one-line repair and the design survives it.
+
+**The structural finding it was asked for, and delivered:** the original's
+per-bit `BITCOUNT` decrement plus a branch to a shared `is_end_of_byte` handler
+**cannot survive at 16 cycles for an arithmetic reason, not a stylistic one.** A
+shared handler inherits only what is left of its caller's budget — 1-4 cycles by
+the time any predecessor path reaches it — while a byte store needs at least 7.
+The only resolution is to make "which byte" a compile-time fact via per-byte
+unroll. That converges independently on GRAINUUM's mechanism, but derived from
+the reference engine's own arithmetic rather than designed fresh. Two entrants
+reaching the same structure from opposite directions is the strongest evidence
+the competition has produced about what the shape of this engine must be.
+
+**The mechanism it found load-bearing in the original:** the combined D+/D-
+sample-and-mask (`USB_DMASK`, one `ands` covering both pins). It looks like a
+convenience but is how the receiver gets SE0 detection *free* from the same read
+that performs the NRZI transition test — a valid bit always leaves exactly one
+pin high, and only SE0 drives both low. The entrant nearly cut it to free a
+register for mask arithmetic, traced the alternative by hand, and found that
+doing so only moves the cost onto the already-tightest path. That is exactly the
+archaeology the control experiment existed to produce.
+
 ## Scoreboard so far
 
 | entrant | state | bit cell | branch-ambiguity exposure |
@@ -255,7 +306,7 @@ before writing any engine. One commit, containing only the import.
 | CLEANSHEET | complete | 16 for 7 bits in 8 | only at the byte boundary |
 | GRAINUUM | complete | 15..16 / 14..16 | every path, 1-2 cycles |
 | NATIVE | complete | n/a — peripheral, mostly negative | n/a |
-| DESCENT | lost | — | — |
+| DESCENT | complete, one-line defect | 15..16 once fixed | every path, after the fix |
 | BALANCE | lost | — | — |
 
 DESCENT (compression of the existing engine), VUSB (AVR school), GRAINUUM (ARM
