@@ -224,3 +224,83 @@ The engine and the six entries live in `doc/py32/` as design artifacts. They are
 (`rv003usb/py32/`). §9's task T2 is substantially answered by the merge but its
 file ownership and acceptance criteria have not been reconciled with what the
 competition actually produced.
+
+
+## Synthesis of the TX and turnaround results — the captain's cross-check
+
+Neither agent could do this: each had one of the two numbers.
+
+### Conformance: ordinary means are NOT enough. SYNC-first is required.
+
+`turnaround.md` gives the response time as **(90 + A)/16 bit times**, where A is
+the transmitter's arm-to-first-edge cost. `engine16_tx.md` reports A.
+
+| A | source | bit times | verdict |
+|---|---|---|---|
+| 10 | conformance threshold | 6.25 | conformant |
+| 14 | exactly 6.5 | 6.50 | conformant, no margin |
+| **30** | **TX pre-staged (identified, NOT implemented)** | **7.50** | **over §7.1.18; inside the 16-18 host timeout** |
+| 80 | TX cold, handshake | 10.62 | inside host timeout only |
+| 112 | TX cold, 8-byte DATA | 12.62 | inside host timeout only |
+
+**The best figure the transmitter can offer is 30 cycles, and 30 gives 7.5 bit
+times — over the 6.5 the specification asks.** So the turnaround analysis's own
+preferred outcome ("ACK-first is unnecessary if A ≤ 10") does not obtain. The
+fallback it designed is not optional, it is the design:
+
+**SYNC-first, PID-gated — conformant at 5.5 bit times for any A ≤ 62.**
+
+Two consequences that follow and are not yet reflected in either document:
+
+1. **The pre-staged arm must actually be built.** It is currently "identified,
+   not implemented" in `engine16_tx.md`. Without it A = 80 and even SYNC-first's
+   A ≤ 62 fails. The pre-staged arm is now on the critical path for conformance,
+   not an optimisation.
+2. **The 8-byte DATA response at A = 112 exceeds 62 even with SYNC-first.** An
+   IN token is answered with DATA, so this case is real and is not covered by
+   the handshake analysis. Whether pre-staging brings the DATA path under 62
+   has not been shown by either document. **This is the open question the two
+   pieces of work leave between them.**
+
+### RAM: the two engines do not fit together as written
+
+| | .datacode | buffer |
+|---|---|---|
+| RX (`engine16_merged.S`) | 1812 B | 32 B |
+| TX (`engine16_tx.S`) | 1368 B | 16 B |
+| **total** | | **3228 B** |
+
+* **F002Bx5, 3072 B — does not fit, 156 B over.**
+* Sharing the identical 512 B CRC16 table brings the pair to 2716 B, which fits
+  with 356 B to spare. That is arithmetic, not implemented.
+* **F003x4, 2048 B — does not fit even with the table shared.** The smallest
+  member of the family the target flip made primary cannot hold both engines,
+  before any C layer, descriptors, stack or DFU. This is a harder constraint
+  than the F002B one and nothing in the plan currently accounts for it.
+
+### The hardware transmitter is rejected, with reasons that stand
+
+`engine16_tx.md` did not dismiss NATIVE's idea, it evaluated it and took its
+core observation (SE0 does work by toggling only the currently-high line) into
+software. What kills the hardware route is that the toggle list must be *built*:
+a floor of 270 cycles, realistically 500-900, is 17-55 bit times, which puts a
+DATA response past the **host timeout**, not merely past §7.1.18. Its escape —
+building the list when the buffer is filled — is not available in this C layer,
+because `usb_handle_user_in_request` runs inside the IN handler
+(`rv003usb.c:193`). After the restructuring that would fix it, both routes are
+~30 cycles and the hardware advantage is gone. Independently: the project's
+PB3/PB4 are on `TIM1_CH2` and `TIM3_CH1`, different timers, so it needs a board
+change; it consumes all three DMA channels; and F002B has neither DMA nor TIM3.
+
+### A verification lesson worth keeping
+
+The TX agent found a live defect that **both the cycle tool and its own
+bit-exact model missed**: a hand-written stuffing row in the `.S` whose sixteen
+entries were all wrong. The model reported 433 packets, 0 failures, while the
+object was broken — because the model built its table from the generator rather
+than reading the assembled object. Only a direct `.S`-versus-generator
+comparison caught it (352/368).
+
+**A model that shares a source with the artifact cannot validate that source.**
+Every table in this project that is embedded in assembly must be diffed against
+its generator, not merely exercised through a model.
