@@ -120,3 +120,65 @@ They solved it in 2020 and published it. We should read it before writing ours.
 3. Our tables are the cost of checking CRC, which V-USB does not do. Keep the
    check, drop the duplicate: −512 B free.
 4. `osccal.S` should be read before the F002B calibration task starts.
+
+---
+
+# Corrections — this file was wrong twice, both in V-USB's favour then against it
+
+Measured after `avr-gcc` was installed and V-USB was actually compiled. See
+`SIZE_COMPARISON.md`.
+
+**1. "It uses no tables at all" is false as stated.** It holds only for the
+variants that skip the receive CRC. Building with `USB_CFG_CHECK_CRC=1` adds two
+256-byte tables and costs **+732 B** — 804 B becomes 1536 B — and that option is
+legal only at 18 MHz. So when V-USB does check the CRC it pays *more* than we
+do, and has to give up two clock options to afford it. Our 800 B of tables is
+not the outlier this file made it look like.
+
+**2. "V-USB does not filter by device address" is false** — I claimed that as
+ours alone. It does, at `asmcommon.inc:65-70`: `lds shift, usbDeviceAddr` /
+`cpse x2, shift` / `rjmp ignorePacket`. Our F-7 was catching up to it, not
+adding something new.
+
+## The number that was missing
+
+The V-USB assembly driver alone, no descriptors, no `usbdrv.c`:
+
+| build | recv CRC | bytes |
+|---|:--:|---:|
+| micronucleus config, 12 MHz | no | 668 |
+| micronucleus config, 16.5 MHz | no | 700 |
+| upstream, 16.5 MHz | no | 724 |
+| upstream, 18 MHz | no | 804 |
+| upstream, 18 MHz, CRC checked | **yes** | **1536** |
+
+## What our own V-USB-shaped engine costs
+
+`doc/py32/engine16_minimal.S` — same choices, our core: no receive CRC, no
+tables, masked-compare unstuffing, unrolled byte. **712 B**, zero tables,
+verified. Against the 1624 B chargeable to receive today, that is **−56 %**, and
+what it gives up is CRC16, CRC5, the branchless cell and per-bit SE0.
+
+## Why we are bigger, decomposed
+
+Assembled: 712 against 520, so 1.37x. **Net of timing filler: 220 against 194,
++13 %.** The 248 B engine gap splits exactly two ways — **+26 B of real
+instructions**, which is irreducible, and **+222 B of padding** to fill a
+16-cycle cell where theirs fills 8. Almost all of the difference is our clock,
+and our clock is forced by those +26 B.
+
+The missing instruction is not the one this file guessed. `bst`/`bld` costs us
++1 per slot; the larger loss is **no AND-immediate** at +2 — `andi shift,0xf9`
+masks the data register in place with a per-position constant, and that single
+instruction is V-USB's *only* reason to unroll.
+
+32-bit width is a wash. It pays in exactly one place: a six-bit window that
+never wraps can live in its own register, so the stuffing test is one shift with
+the same immediate everywhere and the escapes need no repair — worth −6 B
+against +48 B.
+
+The real handicap is neither width nor a missing instruction: **a taken branch
+here is 2-3 cycles rather than a fixed 2**, so V-USB's escape structure would
+drift by up to ~12 cycles across a maximal DATA0 packet on this core. That is
+what our `T_UT` table actually buys, and it is why the structure could not be
+copied even if the bytes were free.
