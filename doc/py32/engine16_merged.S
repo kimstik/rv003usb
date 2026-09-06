@@ -55,11 +55,20 @@
  *   F-3  the token endpoint is bounded against ENDPOINTS before it indexes
  *        ist->eps[], which is the last member of the struct.
  *   F-4  the length argument is payload+3, the C layer's convention.
+ *   F-7  the token address field is filtered against my_address (address 0,
+ *        the unaddressed state, is accepted too).  Latent until F-2 made the
+ *        reply paths reachable; now the difference between ignoring another
+ *        device's token and colliding with its answer.
  *   F-5  the store base is usb_rxbuf+2, so SYNC/PID land at +2/+3 and the
  *        payload pointer handed to C is 4-aligned; the buffer is 2 bytes
  *        longer so the masked index still cannot leave it.
  *   Size: T_UT, T_CRC16 and T_CRC5 moved into the single table block in
  *        engine16_tx.S - one T_CRC16 now serves both engines, -512 B.
+ *
+ * The HSI calibration seam (py32_hsical.h) is wired in the same two places:
+ * a SysTick VAL stamp as the first two instructions of the handler, and one
+ * bl py32_hsical_event past both ISR exits.  Both compile away entirely at
+ * PY32_HSICAL_ENABLE=0.  No bit cell is involved, in either cost model.
  *
  * Assembles with:
  *   arm-none-eabi-gcc -x assembler-with-cpp -mcpu=cortex-m0plus -mthumb -c
@@ -81,6 +90,56 @@
 #endif
 #ifndef ENDPOINTS
 #define ENDPOINTS       2
+#endif
+
+/* Byte offset of rv003usb_internal.my_address, for the device-address filter
+ * (F-7).  Config-dependent: rv003usb.h:124-140 widens every TURBO8TYPE to a
+ * word under RV003USB_OPTIMIZE_FLASH, moving my_address from +1 to +4.  The
+ * predicate below is a verbatim copy of that header's - #ifdef, NOT #if.
+ * That distinction is load-bearing and counter-intuitive: every usb_config.h
+ * in this tree writes `#define RV003USB_OPTIMIZE_FLASH 0`, which #ifdef still
+ * takes, so the live offset in the gamepad build is 4, not 1.  (Measured:
+ * offsetof(struct rv003usb_internal, my_address) == 4 there.)  An #if here
+ * would read the wrong byte and the filter would drop every token.
+ * usb_config.h is already in scope from the F-3 block above; only that one
+ * symbol is needed, so rv003usb.h itself is not pulled in - it defines
+ * USB_GPIO_BASE from the RISC-V port name and #errors on a funconfig.h this
+ * port does not have. */
+#ifndef MY_ADDRESS_OFFSET_BYTES
+#ifdef  RV003USB_OPTIMIZE_FLASH
+#define MY_ADDRESS_OFFSET_BYTES 4
+#else
+#define MY_ADDRESS_OFFSET_BYTES 1
+#endif
+#endif
+
+/* --------------------------------------------------- HSI calibration seam
+ * py32_hsical.c servos the internal RC oscillator against the host's 1 ms
+ * keep-alive; without it PY32F002B cannot reach 24 MHz at all (its factory
+ * 48 MHz word measures 43.12 MHz, -10.2%) and this engine's 16-cycle bit
+ * cell is meaningless.  It asks the ISR for exactly two things: a SysTick
+ * VAL sample taken at a FIXED position at entry, and one call at exit with
+ * that sample.  Both are implemented below; see the notes at each site.
+ *
+ * Defaults track py32_hsical.h, deliberately: the header defaults ENABLE to
+ * 1, so this does too.  A port that does not want the calibration sets
+ * PY32_HSICAL_ENABLE 0 in usb_config.h - which both sides then see, through
+ * the same __has_include block above - and the seam costs zero bytes and
+ * zero cycles here, as it does there.  The two defaults are kept identical
+ * so that a mismatch is a link error against py32_hsical_event, never a
+ * firmware that calibrates silently forever without a reference.
+ *
+ * PY32_HSICAL_OWN_SYSTICK is NOT set here: the engine only ever reads VAL,
+ * and nothing in this port runs SysTick free-running for the calibration to
+ * borrow (the sole SysTick user in the integration tree is LL_mDelay, which
+ * reloads it for a 1 ms tick).  So the calibration keeps ownership - its
+ * default 1 - and py32_hsical_init() must run after the last LL_mDelay.
+ * That ordering is the caller's, not the engine's. */
+#ifndef PY32_HSICAL_ENABLE
+#define PY32_HSICAL_ENABLE 1
+#endif
+#ifndef PY32_HSICAL_TICK_ADDR
+#define PY32_HSICAL_TICK_ADDR 0xE000E018	/* SysTick->VAL, py32_hsical.h */
 #endif
 
 /* ------------------------------------------------------------------ port
@@ -327,6 +386,26 @@ usb_rx_cell\idx:
  * (PRIOR_ART L-23).  The SE0 test comes before the register saves because a
  * keepalive EOP must be recognised within a few tens of cycles (L-9). */
 usb_rx_engine16:
+#if PY32_HSICAL_ENABLE
+	/* THE CALIBRATION STAMP.  py32_hsical.h asks for this "immediately
+	 * after the EXTI_PR ack"; here it is the first thing in the handler
+	 * instead, and that is not a compromise but the only correct reading.
+	 * The ack cannot come first on this port - F-1 puts it LAST, because
+	 * our own reply toggles D- and re-sets the flag, and acking early
+	 * would make every packet we answer re-enter the ISR.  What the
+	 * calibration actually needs is not adjacency to the ack; it is a
+	 * constant delay from the D- edge to this load.  First-in-handler is
+	 * the smallest such delay and the only one that is the same on every
+	 * path: the SE0 test below forks the code, so any position after it
+	 * would give the keep-alive EOP and a packet start two different
+	 * delays - and the keep-alive EOP is the reference being measured.
+	 * Cost here is 2 instructions of constant length; exception entry on
+	 * M0+ is fixed, so the residual jitter is the interrupted
+	 * instruction's completion, a few cycles.  One cycle is 0.004% of
+	 * frequency and the dead band absorbs 16 (py32_hsical.h:36). */
+	ldr     r2, =PY32_HSICAL_TICK_ADDR
+	ldr     r2, [r2]		/* stamp; carried in r2 to both exits */
+#endif
 	ldr     r3, =USB_GPIO_BASE
 	ldr     r0, [r3, #USB_IDR_OFS]
 	movs    r1, #USB_PINMASK
@@ -334,12 +413,53 @@ usb_rx_engine16:
 	bne     1f
 	.global usb_rx_keepalive
 usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
+#if PY32_HSICAL_ENABLE
+	push    {r1, lr}		/* r1 is dead here; the PAIR is what  */
+					/* keeps SP 8-aligned for the AAPCS   */
+					/* call below (entry SP is 8-aligned  */
+					/* by ARMv6-M exception entry).       */
+#endif
 	ldr     r0, =USB_EXTI_BASE	/* acknowledge, or the NVIC re-enters*/
 	movs    r1, #(1 << USB_DM_BIT)
 	str     r1, [r0, #USB_EXTI_PR_OFS]
+#if PY32_HSICAL_ENABLE
+	/* This path IS the reference.  A low-speed keep-alive is an EOP and
+	 * nothing else, so it lands here, once per frame - it is the only
+	 * event the calibration can actually measure, which is why the
+	 * contract says call on EVERY interrupt and do not filter. */
+	mov     r0, r2
+	bl      py32_hsical_event
+	pop     {r1, pc}
+#else
 	bx      lr
+#endif
+	.ltorg				/* Entry literal pool, and it is load-
+					 * bearing at BOTH settings of
+					 * PY32_HSICAL_ENABLE: the entry's
+					 * LDR-literals already sat 1016 of
+					 * their 1020-byte reach from the pool
+					 * at the end of the function, so the
+					 * ten bytes F-7 adds ahead of that
+					 * pool are on their own enough to put
+					 * them out of range and make the
+					 * assembler refuse the build.  Costs
+					 * one duplicated USB_EXTI_BASE word.
+					 * Nothing falls through into it - the
+					 * BX/POP above is unconditional. */
 1:
+#if PY32_HSICAL_ENABLE
+	push    {r2, r3, r4-r7, lr}	/* r2 = the stamp, parked for the tail.
+					 * r3 is PADDING, not data: 7 words
+					 * keeps this frame's residue mod 8 the
+					 * same as the original 5, so the C
+					 * dispatch calls below still make
+					 * their `push {r4}` land on an
+					 * 8-aligned SP - while leaving the
+					 * tail able to pop ONE word and reach
+					 * alignment for its own call. */
+#else
 	push    {r4-r7, lr}
+#endif
 	mov     r4, r8
 	mov     r5, r9
 	mov     r6, r10
@@ -555,6 +675,16 @@ rx_flush7:
 .Lovf_b:
 	b       .Lusb_overrun
 
+/* Trampoline.  .Lusb_done is at the far end of the tail and a Thumb
+ * conditional branch reaches +-254 bytes, which the validate block below
+ * already sat inside by only a few instructions - F-7's four extra ones in
+ * .Ltoken pushed it over, and the assembler said so.  Every reject in the
+ * validate block goes through here instead; the extra B is 2-3 cycles on a
+ * path that is about to do nothing anyway.  The arms past .Ldata are left
+ * pointing straight at .Lusb_done: they are nearer to it than to this. */
+.Ldone_t:
+	b       .Lusb_done
+
 /* =========================== tail: validate and dispatch ==================
  * Untimed, but not unbudgeted: the device must answer 2-6.5 bit times after
  * EOP (USB 2.0 S7.1.18, PRIOR_ART L-1 = 64..208 cycles at 24 MHz).  The CRC
@@ -564,18 +694,18 @@ rx_flush7:
 .Lrx_tail:
 	mov     r2, r11
 	cmp     r2, #(7 << 5)		/* sticky stuffing violation         */
-	beq     .Lusb_done
+	beq     .Ldone_t
 
 	mov     r6, r9			/* rxbuf base                        */
 	mov     r0, r12			/* emitted byte count                */
 	cmp     r0, #2			/* SYNC + PID: a handshake is exactly*/
-	blo     .Lusb_done		/* this and must reach the dispatch  */
+	blo     .Ldone_t		/* this and must reach the dispatch  */
 	cmp     r0, #12			/* longer than any legal LS packet   */
-	bhi     .Lusb_done
+	bhi     .Ldone_t
 
 	ldrb    r1, [r6, #0]
 	cmp     r1, #0x80		/* SYNC decodes to 0x80, oldest-first*/
-	bne     .Lusb_done
+	bne     .Ldone_t
 
 	ldrb    r5, [r6, #1]		/* PID byte                          */
 	lsrs    r1, r5, #4
@@ -583,7 +713,7 @@ rx_flush7:
 	ands    r2, r5
 	eors    r1, r2			/* high nibble must be ~low nibble   */
 	cmp     r1, #0x0F
-	bne     .Lusb_done
+	bne     .Ldone_t
 
 	/* Dispatch on the PID type BEFORE any length constraint: a handshake
 	 * is SYNC + PID + EOP, i.e. two emitted bytes, and the old
@@ -654,9 +784,34 @@ rx_flush7:
 					/* repaired (rv003usb.S:528 is the   */
 					/* correct predecessor).             */
 	movs    r1, #0x7F
-	ands    r0, r1			/* r0 = address                      */
-	adds    r1, r6, #2		/* data pointer                      */
+	ands    r0, r1			/* r0 = address; ANDS sets Z on 0    */
 	ldr     r4, =rv003usb_internal_data
+	/* F-7: the device-address filter.  Accept address 0 - the unaddressed
+	 * state every device answers to before SET_ADDRESS - or a match
+	 * against the address the host assigned us; drop anything else.
+	 * rv003usb.S:524-531 and rv003usb-arm.S:275-283 both do exactly this,
+	 * for the same reason: on a bus with more than one device every token
+	 * is seen by all of them.  It stopped being latent when F-2 made the
+	 * handshake and token arms reachable - the engine now DRIVES the bus
+	 * in reply, so an unfiltered token addressed to another device is a
+	 * collision, not merely a wasted call.
+	 * LDR-literal does not touch the flags, so the Z from the ANDS above
+	 * still stands at the BEQ: the filter is 4 instructions and needs no
+	 * extra register.  LDRB is correct for both offsets - my_address is a
+	 * little-endian uint32_t at +4 under RV003USB_OPTIMIZE_FLASH and a
+	 * uint8_t at +1 without, and only its low byte is ever nonzero (a USB
+	 * address is 7 bits).
+	 * SOF is filtered too, since its 11-bit frame number sits where the
+	 * address does.  Both predecessors do the same and it changes nothing:
+	 * the SOF arm below falls through to .Lusb_done anyway.
+	 * Placed before the PUSH so the reject path needs no SP fixup, and
+	 * entirely inside the post-EOP tail - not one cycle in a bit cell. */
+	beq     .Lt_addr_ok		/* addr 0: unaddressed, always ours  */
+	ldrb    r1, [r4, #MY_ADDRESS_OFFSET_BYTES]
+	cmp     r0, r1
+	bne     .Lusb_done		/* addr != 0 && addr != ours         */
+.Lt_addr_ok:
+	adds    r1, r6, #2		/* data pointer                      */
 	push    {r4}
 	movs    r3, #0			/* unused                            */
 	movs    r4, #0x0F
@@ -741,6 +896,27 @@ rx_flush7:
 	mov     r9, r5
 	mov     r10, r6
 	mov     r11, r7
+#if PY32_HSICAL_ENABLE
+	/* THE CALIBRATION CALL, at the one place the contract allows: after
+	 * the packet is handled and nowhere near SYNC..EOP.  The device's
+	 * reply is already on the wire - usb_send_data transmits inline from
+	 * the C handler above - so this does not touch the 2..6.5 bit-time
+	 * turnaround (PRIOR_ART L-1).  It is also after the EXTI ack, so an
+	 * edge arriving during the call re-pends and is served on return
+	 * rather than being lost.
+	 * Frame here is 7 words; popping the stamp leaves 6, i.e. an 8-
+	 * aligned SP for an AAPCS call, and leaves the padding word to be
+	 * dropped afterwards.  r4-r11 are already restored and the callee
+	 * preserves them, so the call is transparent to the caller.
+	 * Cost: py32_hsical.c counts 12 instructions on the reject path and
+	 * ~40 on the once-per-frame path that writes ICSCR.  Worst case that
+	 * is well under the 128 cycles of a SYNC field, and the phase lock
+	 * keys off the LAST SYNC edge, so a packet that starts during the
+	 * call still locks on re-entry. */
+	pop     {r0}			/* the entry stamp                   */
+	bl      py32_hsical_event
+	add     sp, #4			/* drop the alignment padding word   */
+#endif
 	pop     {r4-r7, pc}
 
 	.size   usb_rx_engine16, . - usb_rx_engine16
