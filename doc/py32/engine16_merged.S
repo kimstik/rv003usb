@@ -65,6 +65,14 @@
  *   Size: T_UT, T_CRC16 and T_CRC5 moved into the single table block in
  *        engine16_tx.S - one T_CRC16 now serves both engines, -512 B.
  *
+ * The receive integrity check is selectable at build time: USB_RX_CHECK is
+ * full CRC-16 (2, the default and bit-for-bit the engine as it was), parity
+ * only (1), or nothing (0).  See the block at USB_BYTE_LIMIT for the contract
+ * and CRC_PARITY.md for the measured detection rates - which are much less
+ * flattering to parity than its algebra suggests, because NRZI turns one
+ * corrupted line sample into two adjacent flipped data bits.  No bit cell
+ * changes at any setting; every cell is 16 cycles by construction.
+ *
  * The HSI calibration seam (py32_hsical.h) is wired in the same two places:
  * a SysTick VAL stamp as the first two instructions of the handler, and one
  * bl py32_hsical_event past both ISR exits.  Both compile away entirely at
@@ -189,6 +197,45 @@
  * bounded twice over: structurally by the mask, and by this. */
 #define USB_BYTE_LIMIT  24
 
+/* ------------------------------------------- the receive integrity check
+ * USB_RX_CHECK selects WHAT this engine verifies before the control flow is
+ * allowed to reach the ACK PID.  The ordering property (turnaround.md, A-9)
+ * holds for every setting; only the strength behind it changes.  The
+ * measured detection rates for all three are in CRC_PARITY.md §3 - read
+ * that before moving this knob, because the honest numbers are much less
+ * flattering to parity than the algebra suggests.
+ *
+ *   2  USB_RX_CHECK_CRC16   full CRC-16 residue test against 0xB001.  The
+ *                           default, and the only setting that detects
+ *                           every single- and double-bit wire error.
+ *   1  USB_RX_CHECK_PARITY  the (x+1) factor of g16 alone.  A genuine
+ *                           partial CRC-16 check - g16 = (x+1)(x^15+x+1),
+ *                           so every valid codeword has even parity - and
+ *                           it is exactly free: SEG4 shrinks by 5 cycles,
+ *                           SEG6 is unchanged, no cell moves, the tail
+ *                           test is 3 instructions against the CRC's 4.
+ *                           It catches all odd-weight errors, which on an
+ *                           NRZI wire is far fewer than it sounds.
+ *   0  USB_RX_CHECK_NONE    no check at all.  This is what V-USB, Grainuum
+ *                           and LemcUSB ship (CRC_ALTERNATIVES.md §9.1).
+ *                           Present so the cost of the other two can be
+ *                           measured against it, not as a recommendation.
+ *
+ * The 512-byte T_CRC16 does NOT go away at settings 1 and 0: it lives in
+ * engine16_tx.S and the transmit engine still needs it, because the host
+ * checks the CRC we send.  Only the receive-side code shrinks. */
+#define USB_RX_CHECK_NONE       0
+#define USB_RX_CHECK_PARITY     1
+#define USB_RX_CHECK_CRC16      2
+#ifndef USB_RX_CHECK
+#define USB_RX_CHECK    USB_RX_CHECK_CRC16
+#endif
+#if USB_RX_CHECK != USB_RX_CHECK_NONE && \
+    USB_RX_CHECK != USB_RX_CHECK_PARITY && \
+    USB_RX_CHECK != USB_RX_CHECK_CRC16
+#error "engine16_merged: USB_RX_CHECK must be 0, 1 or 2"
+#endif
+
 /* Table offsets inside the single base held in r4.  The block itself is in
  * engine16_tx.S - see the note where the tables used to be - and asserts
  * these three offsets there.  T_CRC16 must stay <= 512 for SEG4's index
@@ -247,7 +294,8 @@ usb_rx_cell\idx:
  *   r3  accumulator: bits 0..r0-1 are data (oldest at bit 0), bit r0 = 1
  *   r4  table base    r5 wire packer    r6 pin mask    r7 GPIO base
  *   r8  park: low-nibble index, then the CRC16 table value
- *   r9  rxbuf base (32-byte aligned)    r10 CRC16    r11 unstuff state<<5
+ *   r9  rxbuf base (32-byte aligned)    r11 unstuff state<<5
+ *   r10 CRC16, or the parity accumulator, or unused - see USB_RX_CHECK
  *   r12 emitted byte count              r14 chain head (bit0 set, for bx)
  *
  * The table (T_UT) is indexed by  state*32 + nibble*2  and returns
@@ -308,6 +356,8 @@ usb_rx_cell\idx:
 	adds    r0, r0, r2		/* 1  bit count restored, or -8       */
 	.endm
 
+#if USB_RX_CHECK == USB_RX_CHECK_CRC16
+#define SEG4_CYC 9
 	.macro  SEG4			/* 9: CRC16 byte step, speculative    */
 	mov     r2, r10			/* 1  running CRC                     */
 	eors    r2, r3			/* 1  crc ^ candidate byte            */
@@ -318,6 +368,26 @@ usb_rx_cell\idx:
 	ldrh    r2, [r4, r2]		/* 2                                  */
 	mov     r8, r2			/* 1  park; the commit is decided late*/
 	.endm
+#elif USB_RX_CHECK == USB_RX_CHECK_PARITY
+#define SEG4_CYC 4
+	/* Park the byte, gated.  r1 here is SEG3's "a byte finished" mask,
+	 * NOT the CRC's later count>=3 mask - parity needs no such gate,
+	 * because SYNC and PID contribute a known constant (CRC_PARITY.md
+	 * §1.3) and the tail absorbs it.  r8 is free between SEG1 and SEG6,
+	 * which is exactly the window the CRC16 build parks its table value
+	 * in.  The byte must be taken HERE and not in SEG6: SEG5 shifts it
+	 * out of r3. */
+	.macro  SEG4			/* 4: park the emitted byte           */
+	mov     r2, r3			/* 1  accumulator; byte in bits 0..7  */
+	uxtb    r2, r2			/* 1  drop the sentinel and leftovers */
+	ands    r2, r1			/* 1  zero unless a byte finished     */
+	mov     r8, r2			/* 1  park                            */
+	.endm
+#else
+#define SEG4_CYC 0
+	.macro  SEG4			/* 0: no receive check                */
+	.endm
+#endif
 
 	.macro  SEG5 ovf		/* 11: drop, advance, bound, gate     */
 	movs    r2, #8			/* 1                                  */
@@ -333,6 +403,8 @@ usb_rx_cell\idx:
 	bics    r1, r2			/* 1  / commit mask &= (count >= 3)   */
 	.endm
 
+#if USB_RX_CHECK == USB_RX_CHECK_CRC16
+#define SEG6_CYC 10
 	.macro  SEG6			/* 10: commit the CRC step, or not    */
 	mov     r2, r8			/* 1  parked table value              */
 	ands    r2, r1			/* 1  zero unless committing          */
@@ -345,6 +417,33 @@ usb_rx_cell\idx:
 	eors    r1, r2			/* 1  crc = (crc>>8) ^ T[..], or crc  */
 	mov     r10, r1			/* 1                                  */
 	.endm
+#elif USB_RX_CHECK == USB_RX_CHECK_PARITY
+#define SEG6_CYC 10
+	/* Fold the parked byte to one bit and XOR it into r10.  r1 is dead
+	 * from here (the CRC build clobbers it in the same place), so this
+	 * segment has TWO scratch registers and the fold is a plain
+	 * halve-and-xor chain - no table, no branch, no memory.  A zeroed
+	 * park (no byte finished) folds to 0, so the step is idempotent and
+	 * needs no commit mask of its own.
+	 * Only bit 0 of r10 is ever read; bits 1..7 collect the junk the
+	 * partial folds leave, and XOR is bitwise, so they cannot reach it. */
+	.macro  SEG6			/* 10: parity of the byte, into r10   */
+	mov     r1, r8			/* 1  the gated byte                  */
+	lsrs    r2, r1, #4		/* 1  \                               */
+	eors    r1, r2			/* 1   |                              */
+	lsrs    r2, r1, #2		/* 1   | bit 0 = parity of the byte   */
+	eors    r1, r2			/* 1   |                              */
+	lsrs    r2, r1, #1		/* 1   |                              */
+	eors    r1, r2			/* 1  /                               */
+	mov     r2, r10			/* 1  running parity                  */
+	eors    r2, r1			/* 1                                  */
+	mov     r10, r2			/* 1                                  */
+	.endm
+#else
+#define SEG6_CYC 0
+	.macro  SEG6			/* 0: no receive check                */
+	.endm
+#endif
 
 /* NRZI for eight wire bits at once.  The predecessor of sample i is bit i+1
  * of the same register, so one shift and one xor decode a whole byte - and
@@ -479,10 +578,15 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
 					/* ARMv6-M has no unaligned access.  */
 	ldr     r2, =(usb_rx_chain + 1)	/* chain head, bit0 set for bx       */
 	mov     r14, r2
+#if USB_RX_CHECK == USB_RX_CHECK_CRC16
 	movs    r2, #0
 	mvns    r2, r2
 	lsrs    r2, r2, #16		/* 0xFFFF                            */
 	mov     r10, r2			/* CRC16 init                        */
+#elif USB_RX_CHECK == USB_RX_CHECK_PARITY
+	movs    r2, #0
+	mov     r10, r2			/* parity accumulator init           */
+#endif
 	movs    r1, #200		/* bounded spin (PRIOR_ART A-16)     */
 	b       .Lsync_hunt
 .Lgiveup:				/* in range of the hunt's B<cond>    */
@@ -603,13 +707,15 @@ usb_rx_chain:
 	USE     11			/* 5 + 11 + 0     = 16               */
 	CELL    4
 	SEG4
-	USE     9			/* 5 + 9  + 2 nop = 16               */
+	USE     SEG4_CYC		/* CRC16 5+9+2nop; parity 5+4+7nop;  */
+					/* none 5+0+11nop.  Always 16.       */
 	CELL    5
 	SEG5    .Lovf_a
 	USE     11			/* 5 + 11 + 0     = 16               */
 	CELL    6
 	SEG6
-	USE     10			/* 5 + 10 + 1 nop = 16               */
+	USE     SEG6_CYC		/* CRC16 and parity 5+10+1nop; none  */
+					/* 5+0+11nop.  Always 16.            */
 	CELL    7
 	SEGA
 	USE     8
@@ -737,10 +843,27 @@ rx_flush7:
 .Ldata:
 	cmp     r0, #4			/* SYNC + PID + CRC16 at least       */
 	blo     .Lusb_done
+#if USB_RX_CHECK == USB_RX_CHECK_CRC16
 	mov     r1, r10
 	ldr     r2, =0x0000B001
 	cmp     r1, r2
 	bne     .Lusb_done
+#elif USB_RX_CHECK == USB_RX_CHECK_PARITY
+	/* r10 bit 0 is the XOR of the per-byte parities of every emitted
+	 * byte - SYNC, PID and the data field.  parity(SYNC=0x80) = 1 and
+	 * every legal PID byte has parity 0 (it is (~n<<4)|n, and
+	 * popcount(~n) = 4 - popcount(n)), and the PID's own complement test
+	 * three instructions up has already rejected anything else.  A valid
+	 * data field has parity 0.  So bit 0 must be 1, and the whole test is
+	 * a shift into carry.  CRC_PARITY.md §1.3 verifies all three legs.
+	 * This sits in exactly the same place in the control flow as the
+	 * residue test it replaces, so the ACK PID stays downstream of the
+	 * verdict (turnaround.md, A-9) - and it is one instruction shorter,
+	 * so the 2..6.5 bit-time turnaround does not get worse. */
+	mov     r1, r10
+	lsrs    r1, r1, #1		/* C = accumulated parity            */
+	bcc     .Lusb_done
+#endif
 	subs    r3, r0, #1		/* F-4: the C layer's convention is  */
 					/* payload + 3 (rv003usb.c:300 does  */
 					/* length -= 3), and the count here  */
