@@ -364,6 +364,81 @@ inputs so the pull-up holds J. SE0 is therefore **32 cycles = 1.333 µs** at
 is straight-line `nop` and not a loop: two iterations of a loop whose back edge
 is 2-3 cycles would spend the entire low-side margin on the ambiguity.
 
+### 6.3 The trailing stuffed zero, and the free channel that carried it
+
+USB 2.0 §7.1.9, last sentence: *"If required by the bit stuffing rules, a zero
+bit will be inserted even if it is the last bit before the end-of-packet
+signal."*
+
+`T_TX` **defers** a stuffed zero to the head of the next nibble — that is what
+its seventh row is for — and at the end of a packet there is no next nibble.
+The chain's dispatch went to `usb_tx_eop` the moment the source ran out, and
+nothing in it tested the stuff state, so a packet whose last six data bits are
+1s went out one bit short. `design_b_in_model.py` measures that at **0.61 % of
+packets**, about one in 160.
+
+Every direct fix costs a cycle the cell does not have. The state lives in
+`r11` as `(state+1)<<5`; reading it, comparing it against `7<<5` and selecting
+a target is three instructions against `TXSEG7`'s one spare, and every low
+register is live. Branching is worse: a taken conditional is 2–3 cycles, so
+whichever side of the test carries the branch loses its store's cycle-5 slot,
+and the EOP edge stops landing on a bit boundary.
+
+**What is free is the byte the pipeline over-fetches.** The chain runs one byte
+ahead, so during the last byte's cells it fetches, CRCs and table-expands a
+byte past the end, and `TXSEG6` computes a dispatch index from it. Zero that
+slot at setup, and that index becomes the answer:
+
+* a `0x00` byte inserts **no** stuffed bit from stuff state 0…5 — its first
+  wire bit is a 0, which resets the run — so `n` comes out **8**;
+* from state 6 the table's own forced zero is prepended, so `n` comes out
+  **9**.
+
+`n` is already in `r1`. The whole fix is to let `TXSEG7` choose between two
+dispatch tables with the index it already has, instead of forcing it to zero:
+
+```
+  lsrs r2, r0, #31    1 while bytes remain, 0 at the end of the packet
+  lsls r2, r2, #3     8 -> T_DISPATCH, 0 -> T_EXH
+  adds r1, r1, r2     the same n picks the row in whichever it is
+  lsls r1, r1, #2
+```
+
+which is `TXSEG7`'s old `asrs`/`ands` pair plus two, paid for by moving the
+`subs r0, #3` back into `TXSEG6` and dropping its `lsls r1, r1, #2` (the word
+scaling moved to `TXSEG7`, where it was needed anyway). `T_EXH[1]` is
+`usb_tx_eop`; `T_EXH[2]` and `[3]` are `usb_tx_stuff0`, a 16-cycle cell that
+toggles once and falls into EOP.
+
+The stuff cell drives a hard `eors r5, r6`, not a queue shift. A stuffed bit is
+a 0 by definition, and nothing should depend on what the over-fetch happened to
+leave in the queue — the over-fetched byte's value is load-bearing for the
+*dispatch*, and making it load-bearing for the *bit* as well would be a second
+place to get wrong.
+
+**Cost.** Zero cycles: all eleven cells are exactly 16, and the block-header
+output of `tools/engine16_cyc.py` is identical to the previous engine's in
+every cost model. 68 B of flash — 32 for the second dispatch table, 32 for the
+cell, 4 for the setup's `movs`/`strb`. `T_TX` moves from the TX base + 32 to
++ 64 and `T_CRC16` from + 256 to + 288 (still two `adds #144`); the assertions
+at the end of the table block make a wrong layout a build failure, and the
+table *data* is byte-identical across the move, checked directly.
+
+**Verification.** `tools/engine16_tx_model.py` is new: it transliterates the
+chain instruction for instruction, resolves the dispatch words through the
+**object's relocation table** rather than a copy of the source, and compares
+the emitted NRZI level sequence against a reference encoder that applies
+§7.1.9 in full.
+
+```
+engine16_tx.S      6030 cases, 0 mismatches
+tx_base.S (before) 6030 cases, 63 mismatches - every one of them exactly the
+                   missing trailing zero, no other kind
+```
+
+The second line is the one that matters: a model that reports 0 on the fixed
+engine proves nothing unless it reports the defect on the broken one.
+
 ## 7. Registers, footprint, and what this design gives up
 
 **Register allocation, honestly.** All fourteen usable registers are live in

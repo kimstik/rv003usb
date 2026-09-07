@@ -339,12 +339,11 @@ same bit at `.Lir_tail`. So:
 
 Pre-rendering therefore **does not fix anything that Design B's IN direction
 had wrong**, and it is worth being exact about that rather than claiming a
-win. What still has the defect is **`engine16_tx.S`'s own transmit chain**,
-which is a different chain: its dispatch word row 0 goes to `usb_tx_eop` the
-moment the source is exhausted (`engine16_tx.S`:606) and nothing anywhere in
-it tests the stuff state. That chain is untouched here, and it is still the
-path for the first IN after any state change and for a build with
-`USB_TURNAROUND_B_IN` off.
+win. What had the defect was **`engine16_tx.S`'s own transmit chain**, which
+is a different chain: its dispatch row 0 went to `usb_tx_eop` the moment the
+source was exhausted and nothing anywhere in it tested the stuff state. That
+chain is untouched *here*; it is fixed separately, in `engine16_tx.md` §6.3,
+for zero cycles and 68 B.
 
 One measurement worth having: **none of the gamepad demo's 27 packets ends in
 a stuffed zero.** The defect is real at 1 in 150 over arbitrary payloads, but

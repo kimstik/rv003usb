@@ -126,9 +126,10 @@
 /* Table layout, one base register (r14).  Row 0 of the halfword table is
  * reused as the dispatch table, because the stuff state is stored as
  * (state+1) and therefore never selects row 0. */
-#define T_DISPATCH      0		/*  8 words: chain entry, or EOP      */
-#define T_TX            32		/*  7 rows x 16 halfwords             */
-#define T_CRC16         256		/* 256 halfwords                      */
+#define T_EXH           0		/*  8 words: the exhausted dispatch   */
+#define T_DISPATCH      32		/*  8 words: chain entry, live bytes  */
+#define T_TX            64		/*  7 rows x 16 halfwords, row 1 here */
+#define T_CRC16         288		/* 256 halfwords                      */
 
 /* ------------------------------------------------- cycle-accounting macros
  * Same device as engine16_merged.S: the ledger is assembled, not asserted.
@@ -249,8 +250,8 @@ usb_tx_\name:
 	lsls    r1, r1, #1		/* 1  halfword index                  */
 	mov     r2, r11			/* 1  (state+1)<<5 selects the row    */
 	orrs    r1, r2			/* 1                                  */
-	nop				/* 1                                  */
-	.endm
+	adds    r1, #(T_TX - 32)	/* 1  r11 already carries 32 for row  */
+	.endm				/*    1; T_TX puts row 1 at 64        */
 
 	.macro  TXSEG4			/* 11: low nibble -> bits, state, n   */
 	mov     r2, r14			/* 1                                  */
@@ -272,9 +273,9 @@ usb_tx_\name:
 	mov     r12, r1			/* 1  park n_lo                       */
 	mov     r1, r11			/* 1  the state the low nibble left   */
 	orrs    r1, r2			/* 1                                  */
+	adds    r1, #(T_TX - 32)	/* 1  the same row bias as TXSEG3     */
 	mov     r2, r14			/* 1                                  */
 	ldrh    r1, [r2, r1]		/* 2                                  */
-	nop				/* 1                                  */
 	nop				/* 1                                  */
 	.endm
 
@@ -286,20 +287,23 @@ usb_tx_\name:
 	lsls    r1, r1, r2		/* 1  align to the sentinel           */
 	adds    r0, r0, r1		/* 1  ONE add: append, and move it    */
 	lsrs    r1, r0, #8		/* 1  1 / 2-3 / 4-7 for n = 8 / 9 / 10*/
-	lsls    r1, r1, #2		/* 1  word index into T_DISPATCH      */
 	mov     r12, r0			/* 1  park the queue                  */
 	mov     r2, r8			/* 1                                  */
 	subs    r0, r3, r2		/* 1  source - CRC pointer            */
-	.endm
+	subs    r0, #3			/* 1  ZERO iff there is no next byte, */
+	.endm				/*    negative while bytes remain     */
 
 	.macro  TXSEG7			/* 11: dispatch, or leave for EOP     */
-	subs    r0, #3			/* 1  >=0 iff there is no next byte   */
-	asrs    r0, r0, #31		/* 1  -1 while bytes remain, else 0   */
-	ands    r1, r0			/* 1  index 0 = T_DISPATCH[0] = EOP   */
+	lsrs    r2, r0, #31		/* 1  1 while bytes remain, 0 at the  */
+					/*    end of the packet               */
+	lsls    r2, r2, #3		/* 1  8 -> T_DISPATCH, 0 -> T_EXH     */
+	adds    r1, r1, r2		/* 1  the SAME n picks the row in     */
+					/*    whichever of the two it is      */
+	lsls    r1, r1, #2		/* 1  word index                      */
 	mov     r2, r14			/* 1                                  */
-	ldr     r1, [r2, r1]		/* 2  chain entry, or the EOP handler */
+	ldr     r1, [r2, r1]		/* 2  chain entry, or EOP, or the     */
+					/*    trailing stuffed zero           */
 	mov     r4, r12			/* 1  the queue, after this cell's bit*/
-	nop				/* 1                                  */
 	bx      r1			/* 3  flat 3: no 2-vs-3 ambiguity     */
 	.endm
 
@@ -425,6 +429,15 @@ usb_send_data:
 2:
 	mov     r8, r0
 
+	/* Zero the slot the pipeline over-fetches one byte past the end.
+	 * From ANY stuff state 0..5 a 0x00 byte inserts no stuffed bit, so
+	 * the chain's own n comes out 8; from state 6 the table's forced
+	 * zero makes it 9.  That is what lets TXSEG7 read "a trailing
+	 * stuffed zero is owed" off the dispatch index it already has,
+	 * without a register, a compare or a cycle.  See S6.3. */
+	movs    r2, #0
+	strb    r2, [r0, #2]
+
 	adds    r0, r6, #3
 	mov     r9, r0			/* the low edge of the CRC window    */
 	adds    r3, r6, #1		/* source pointer: the PID is next   */
@@ -502,6 +515,32 @@ usb_tx_chain:
 	TXSEG7
 	TXUSE   11
 	TXCELL_END
+
+/* ===================== the trailing stuffed zero, timed ==================
+ * USB 2.0 S7.1.9: "If required by the bit stuffing rules, a zero bit will be
+ * inserted even if it is the last bit before the end-of-packet signal."
+ * T_TX DEFERS a stuffed zero to the head of the next nibble - that is what
+ * its seventh row is for - and at the end of a packet there is no next
+ * nibble, so this cell is where the deferred bit goes.
+ *
+ * Reached only from T_EXH[2] and T_EXH[3], i.e. only when the over-fetched
+ * 0x00 came out nine wire bits long, i.e. only from stuff state 6.  Nothing
+ * falls into it: cellS7 ends with `bx`.  It emits the bit and falls through
+ * into EOP, so the whole packet is exactly one bit time longer.
+ *
+ * The bit is a hard toggle, not a queue shift: a stuffed bit is a 0 by
+ * definition and nothing here should depend on what the over-fetch left in
+ * the queue.  The store is at cycle 5, where every data bit's store is. */
+	.global usb_tx_stuff0
+usb_tx_stuff0:
+	eors    r5, r6			/* 1  NRZI: toggle = a 0 bit          */
+	nop				/* 1                                  */
+	nop				/* 1                                  */
+	nop				/* 1                                  */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1  =5  on the bit boundary         */
+	.rept   11
+	nop
+	.endr				/* =16, then fall into EOP            */
 
 /* ============================ EOP, still timed ===========================
  * Reached by the dispatch word, i.e. by the `bx` that closes the last data
@@ -599,11 +638,29 @@ usb_tx_eop:
 	.global usb_tx_tables
 usb_tx_tables:
 .Ltab_tx:
-	/* Row 0 doubles as T_DISPATCH.  TXSEG6 computes acc>>8, which is 1
-	 * for n=8, 2..3 for n=9 and 4..7 for n=10; TXSEG7 forces it to 0 when
-	 * the packet has run out.  Nothing else can select row 0, because the
-	 * stuff state is stored as (state+1) >= 1. */
-	.word   usb_tx_eop + 1		/* 0: no byte left -> EOP            */
+.Ltab_exh:
+	/* T_EXH - where the chain goes when the packet has run out.  TXSEG6
+	 * computes acc>>8 = 1 for n=8, 2..3 for n=9, 4..7 for n=10, and it
+	 * computed it from the OVER-FETCHED byte, which the setup zeroed.
+	 * A 0x00 byte inserts no stuffed bit from stuff state 0..5 (n=8) and
+	 * exactly one from state 6 (n=9), so this row's index IS the answer
+	 * to "is a trailing stuffed zero owed" - already in r1, for free.
+	 * n=10 is unreachable from 0x00; those slots hold EOP so that a
+	 * corrupted state cannot fall out of the table. */
+	.word   usb_tx_eop + 1		/* 0: unreachable, acc>>8 >= 1       */
+	.word   usb_tx_eop + 1		/* 1: n = 8  -> nothing owed         */
+	.word   usb_tx_stuff0 + 1	/* 2: n = 9  -> the deferred zero    */
+	.word   usb_tx_stuff0 + 1	/* 3: n = 9                          */
+	.word   usb_tx_eop + 1		/* 4: n = 10, unreachable            */
+	.word   usb_tx_eop + 1		/* 5: n = 10, unreachable            */
+	.word   usb_tx_eop + 1		/* 6: n = 10, unreachable            */
+	.word   usb_tx_eop + 1		/* 7: n = 10, unreachable            */
+
+.Ltab_disp:
+	/* T_DISPATCH - the live chain entry, selected by the same n.  TXSEG7
+	 * adds 8 to the index while bytes remain, which is what picks this
+	 * table over T_EXH; the row within it is unchanged. */
+	.word   usb_tx_eop + 1		/* 0: unreachable, acc>>8 >= 1       */
 	.word   usb_tx_cellS0 + 1		/* 1: n = 8                          */
 	.word   usb_tx_cellP1 + 1		/* 2: n = 9                          */
 	.word   usb_tx_cellP1 + 1		/* 3: n = 9                          */
@@ -611,6 +668,8 @@ usb_tx_tables:
 	.word   usb_tx_cellP0 + 1		/* 5: n = 10                         */
 	.word   usb_tx_cellP0 + 1		/* 6: n = 10                         */
 	.word   usb_tx_cellP0 + 1		/* 7: n = 10                         */
+
+.Ltab_txrows:
 
 	/* T_TX: 7 stuff states x 16 data nibbles, at row (state+1).
 	 * halfword = m<<9 | (n-4)<<8 | (state'+1)<<5,  m = w + 2^n - 1. */
@@ -723,11 +782,23 @@ usb_tables:
 	.hword	0x0014, 0x0002, 0x0011, 0x0007, 0x001e, 0x0008, 0x001b, 0x000d
 
 .Ltab_end:
-	.if     (.Ltab_rx - .Ltab_tx) != 256
-	.error  "engine16 tables: usb_tables is not usb_tx_tables + 256"
+	.if     (.Ltab_exh - .Ltab_tx) != T_EXH
+	.error  "engine16 tables: T_EXH is not at the TX base + 0"
 	.endif
-	.if     (.Ltab_crc16 - .Ltab_tx) != 256
-	.error  "engine16 tables: T_CRC16 is not at the TX base + 256"
+
+	.if     (.Ltab_disp - .Ltab_tx) != T_DISPATCH
+	.error  "engine16 tables: T_DISPATCH is not at the TX base + 32"
+	.endif
+
+	.if     (.Ltab_txrows - .Ltab_tx) != T_TX
+	.error  "engine16 tables: T_TX row 1 is not at the TX base + 64"
+	.endif
+
+	.if     (.Ltab_rx - .Ltab_tx) != 288
+	.error  "engine16 tables: usb_tables is not usb_tx_tables + 288"
+	.endif
+	.if     (.Ltab_crc16 - .Ltab_tx) != 288
+	.error  "engine16 tables: T_CRC16 is not at the TX base + 288"
 	.endif
 	.if     (.Ltab_crc16 - .Ltab_rx) != 0
 	.error  "engine16 tables: T_CRC16 is not at the RX base + 0"
@@ -741,8 +812,8 @@ usb_tables:
 	.if     (.Ltab_end - .Ltab_rx) != 1056
 	.error  "engine16 tables: the RX half of the block is not 1056 bytes"
 	.endif
-	.if     (.Ltab_end - .Ltab_tx) != 1312
-	.error  "engine16 tables: the block is not 1312 bytes"
+	.if     (.Ltab_end - .Ltab_tx) != 1344
+	.error  "engine16 tables: the block is not 1344 bytes"
 	.endif
 
 	.section .bss.usb_txbuf, "aw", %nobits

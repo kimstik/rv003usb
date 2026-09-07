@@ -207,17 +207,18 @@ def main():
     print("record bytes needed, with the one-group prefetch overrun: %d of 24"
           % ((worst + 7) // 8 + 1))
 
-    # engine16_tx.S walks the same table and has no equivalent of .Lir_tail:
-    # its chain leaves for the EOP the moment the source is exhausted, so a
-    # packet whose last six data bits are 1s goes out without the zero
-    # S7.1.9 requires.  Count how often that is.
+    # Both transmit paths defer the stuffed zero into the next nibble and so
+    # both need a tail: usb_in_render has .Lir_tail, and engine16_tx.S's chain
+    # has usb_tx_stuff0, reached from T_EXH when the over-fetched 0x00 comes
+    # out nine wire bits long.  Count how often that tail is the difference.
     short = 0
     for pid, pay in cases:
         s = render(pid, pay)
         if s and s[-1] == 0 and len(s) >= 7 and all(x == 1 for x in s[-7:-1]):
             short += 1
-    print("packets whose last bit is a stuffed zero (engine16_tx.S omits it):"
-          " %d of %d = %.2f%%" % (short, len(cases), 100.0 * short / len(cases)))
+    print("packets whose last bit is a stuffed zero: %d of %d = %.2f%%"
+          "  (usb_in_render emits it at .Lir_tail; engine16_tx.S emits it in"
+          " usb_tx_stuff0)" % (short, len(cases), 100.0 * short / len(cases)))
     return 1 if bad else 0
 
 
