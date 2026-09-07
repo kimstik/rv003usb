@@ -484,17 +484,23 @@ usb_rx_cell\idx:
 	mov     r11, r2			/* 1                                  */
 	.endm
 
-	.macro  SEG1			/* 11: append it, then low nibble     */
+	.macro  SEG1_A			/* 6:  append the high nibble's bits  */
 	lsls    r2, r1, #5		/* 1  \  n = (entry>>24)&7            */
 	lsrs    r2, r2, #29		/* 1  /                               */
 	lsrs    r1, r1, #27		/* 1  m                               */
 	lsls    r1, r1, r0		/* 1  align to the sentinel           */
 	adds    r3, r3, r1		/* 1  insert n bits, move sentinel    */
 	adds    r0, r0, r2		/* 1  bit count += n                  */
+	.endm
+	.macro  SEG1_B			/* 5:  the low nibble's lookup        */
 	mov     r1, r8			/* 1  low nibble*4                    */
 	mov     r2, r11			/* 1                                  */
 	orrs    r1, r2			/* 1                                  */
 	ldr     r1, [r4, r1]		/* 2                                  */
+	.endm
+	.macro  SEG1			/* 11: append it, then low nibble     */
+	SEG1_A
+	SEG1_B
 	.endm
 
 /* Design B needs the flush cut finer than one segment per piece: eight TX
@@ -540,36 +546,53 @@ usb_rx_cell\idx:
  * SEG4, which change 1 left with the room.  The flush emits SEG3 then SEG4
  * back to back, so the untimed copy is unchanged instruction for
  * instruction. */
-#define SEG3_CYC        (6 + USB_RAM_ACCESS)
-	.macro  SEG3_A			/* 6/8                                */
+/* "A byte finished this wire byte" is `r0 >= 8`, and r0 <= 15 - so it is
+ * BIT 3 OF r0, and the subtract-and-restore pair that used to expose it was
+ * three cycles of ceremony around a bit that was already there.
+ *
+ * The bound r0 <= 15 is an invariant, not an assumption: r0 enters a wire
+ * byte at <= 7 (SEG3_TAIL below reduces it mod 8), and SEG1 and SEG2_B each
+ * add at most 4, because a nibble contributes at most four kept bits.  It
+ * holds in the flush too, and that is the part worth checking: entering
+ * rx_flush5 means SE0 was sampled in cell 5, so cells 0..4 ALREADY ran
+ * SEG0..SEG4 for the byte in flight.  Every wire byte gets a complete
+ * SEG0..SEG6 - part in the timed cells, part in the flush - so no byte ever
+ * reaches SEG3 having skipped a SEG3_TAIL, and r0 never reaches 16.
+ *
+ * Cost, per wire byte: SEG3_A loses the `subs` (-1) and SEG4 loses one of
+ * SEG3_TAIL's three (-1); SEG3_B and SEG5 are unchanged.  audit_discarded.md
+ * A15.  The two cycles come off B(K) for every K <= 4, i.e. off the CEILING,
+ * and off B(5) and B(6) not at all, i.e. not off the floor. */
+#define SEG3_CYC        (5 + USB_RAM_ACCESS)
+	.macro  SEG3_A			/* 5/7                                */
 	mov     r2, r12			/* 1  emitted byte count              */
 	lsls    r2, r2, #USB_RXBUF_MASK	/* 1  \ BALANCE: index &= 31, so no   */
 	lsrs    r2, r2, #USB_RXBUF_MASK	/* 1  / store can leave the buffer    */
 	strb    r3, [r1, r2]		/* 2/4  speculative store of the byte */
-	subs    r0, r0, #8		/* 1  negative <=> byte not finished  */
 	.endm
 	.macro  SEG3_B			/* 2                                  */
-	asrs    r1, r0, #31		/* 1  -1 if NOT finished              */
-	mvns    r1, r1			/* 1  commit mask: -1 finished, 0 not */
+	lsls    r2, r0, #28		/* 1  bit 3 of r0 -> the sign bit     */
+	asrs    r1, r2, #31		/* 1  commit mask: -1 finished, 0 not */
 	.endm
 	.macro  SEG3			/* 9/11: bounded store, commit mask   */
 	SEG3_A
 	SEG3_B
 	.endm
 
-/* The three cycles SEG3 handed over.  They run at the head of every SEG4,
- * at every USB_RX_CHECK setting, because they are not part of the check:
- * they restore r0 (the bit count) after SEG3's speculative `subs #8`. */
-	.macro  SEG3_TAIL		/* 3: restore the bit count           */
-	movs    r2, #8			/* 1                                  */
-	bics    r2, r1			/* 1  8 if not finished, else 0       */
-	adds    r0, r0, r2		/* 1  bit count restored, or -8       */
+/* The two cycles SEG3 handed over.  They run at the head of every SEG4, at
+ * every USB_RX_CHECK setting, because they are not part of the check: they
+ * take the emitted byte's eight bits off r0.  r0 <= 15, so `r0 & 7` IS
+ * `r0 - 8` when a byte finished and `r0` when it did not - one mask, no
+ * branch, and no mask register. */
+	.macro  SEG3_TAIL		/* 2: drop the byte's bits from r0    */
+	lsls    r0, r0, #29		/* 1  \ r0 &= 7, which is r0 - 8 when */
+	lsrs    r0, r0, #29		/* 1  / a byte finished, r0 when not  */
 	.endm
 
 #if USB_RX_CHECK == USB_RX_CHECK_CRC16
-#define SEG4_CYC 10
-	.macro  SEG4			/* 10: 3 of SEG3, then the CRC16 step */
-	SEG3_TAIL			/* 3                                  */
+#define SEG4_CYC 9
+	.macro  SEG4			/* 9: 2 of SEG3, then the CRC16 step  */
+	SEG3_TAIL			/* 2                                  */
 	mov     r2, r10			/* 1  running CRC                     */
 	eors    r2, r3			/* 1  crc ^ candidate byte            */
 	uxtb    r2, r2			/* 1                                  */
@@ -579,7 +602,7 @@ usb_rx_cell\idx:
 	mov     r8, r2			/* 1  park; the commit is decided late*/
 	.endm
 #elif USB_RX_CHECK == USB_RX_CHECK_PARITY
-#define SEG4_CYC 7
+#define SEG4_CYC 6
 	/* Park the byte, gated.  r1 here is SEG3's "a byte finished" mask,
 	 * NOT the CRC's later count>=3 mask - parity needs no such gate,
 	 * because SYNC and PID contribute a known constant (CRC_PARITY.md
@@ -587,17 +610,17 @@ usb_rx_cell\idx:
 	 * which is exactly the window the CRC16 build parks its table value
 	 * in.  The byte must be taken HERE and not in SEG6: SEG5 shifts it
 	 * out of r3. */
-	.macro  SEG4			/* 7: 3 of SEG3, then park the byte   */
-	SEG3_TAIL			/* 3                                  */
+	.macro  SEG4			/* 6: 2 of SEG3, then park the byte   */
+	SEG3_TAIL			/* 2                                  */
 	mov     r2, r3			/* 1  accumulator; byte in bits 0..7  */
 	uxtb    r2, r2			/* 1  drop the sentinel and leftovers */
 	ands    r2, r1			/* 1  zero unless a byte finished     */
 	mov     r8, r2			/* 1  park                            */
 	.endm
 #else
-#define SEG4_CYC 3
-	.macro  SEG4			/* 3: SEG3's tail, and no check       */
-	SEG3_TAIL			/* 3                                  */
+#define SEG4_CYC 2
+	.macro  SEG4			/* 2: SEG3's tail, and no check       */
+	SEG3_TAIL			/* 2                                  */
 	.endm
 #endif
 
@@ -713,9 +736,14 @@ usb_rx_cell\idx:
  * T_CRC16 at offset 0 - the nops CELL emits, per wire byte:
  *
  *   cell   0  1  2  3  4  5  6  7      total
- *   free   4  0  2  1  1  0  1  0        9
+ *   free   4  0  2  2  2  0  1  0       11
  *
- * Nine, which is what CRC_ROUND2.md S3 predicts for this configuration.
+ * CRC_ROUND2.md S3 predicts nine for this configuration; the two extra are
+ * the ones audit_discarded.md A15 returned, one from cell 3 and one from
+ * cell 4, when the speculative `subs r0,#8` and its restore collapsed into
+ * bit 3 of r0.  They are free cycles in the timed chain, which is to say
+ * they are worth nothing here - their value is that the same two cycles come
+ * off B(K) in the flush, which IS on the turnaround deadline.
  * CRC_ROUND2.md S3.2 then spends 28 of them - across wire bytes 2..5 - on
  * pre-staging the tail's SYNC compare, PID complement, PID type dispatch,
  * "is a response owed" and the C-call marshalling.  THAT DOES NOT FIT HERE,
@@ -911,8 +939,23 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
  * the response one it is inside piece 0's slack.  r2 is the only free
  * register here - r1 already carries the table entry SEG\idx will consume -
  * which is why the base has to be re-fetched from r9 each time. */
-	.macro  EOPSTUB idx, unsampled
+	.macro  EOPSTUB idx, unsampled, pad=0
 rx_eop\idx:
+	/* THE FLOOR PAD, and it belongs to this K alone.  turnaround.md S11.3
+	 * put four nops in usb_tb_head to keep the EARLIEST entry (K=6) above
+	 * the two-bit-time floor of S7.1.18 - but usb_tb_head is on the path
+	 * of every K from 1 to 7, so those four cycles were also charged to
+	 * K=1, which is the entry that sets the CEILING.  The window is 64
+	 * cycles wide and the spread across K is 53, so the two limits are
+	 * held by different entries and a pad that is common to both is the
+	 * wrong instrument: it buys the floor at the ceiling's expense, one
+	 * for one.  Here the pad is per-entry, in the stub, which costs
+	 * nothing (the stubs are already eight separate blocks) and makes
+	 * every uniform saving downstream worth its full value at the
+	 * ceiling instead of zero.  See audit_discarded.md S0.3 and SE.1. */
+	.rept   \pad
+	nop
+	.endr
 	movs    r2, #\unsampled	/* 1  wire-bit slots never sampled   */
 	mov     r14, r2			/* 1                                 */
 #if USB_TURNAROUND_B
@@ -1053,7 +1096,7 @@ usb_rx_chain:
 /* EOP stubs for cells 4..7, and the overflow escape for SEG5 in cell 5. */
 	EOPSTUB 4, 4
 	EOPSTUB 5, 3
-	EOPSTUB 6, 2
+	EOPSTUB 6, 2, 12
 	EOPSTUB 7, 1
 .Lovf_a:
 	b       .Lusb_overrun
@@ -1305,10 +1348,13 @@ usb_tb_\nm:
 /* Declared costs of the segment halves, so the cell ledger below is
  * assembled rather than asserted.  They track the macros above. */
 #define SEG0_CYC        7
+#define SEG0_CYC_       7
+#define SEG1A_CYC       6
+#define SEG1B_CYC       5
 #define SEG1_CYC        11
 #define SEG2A_CYC       3
 #define SEG2B_CYC       6
-#define SEG3A_CYC       (4 + USB_RAM_ACCESS)
+#define SEG3A_CYC       (3 + USB_RAM_ACCESS)
 #define SEG3B_CYC       2
 #define SEG5A_CYC       2
 #define SEG5B_CYC       9
@@ -1365,9 +1411,10 @@ usb_tb_\nm:
 					/* been driven yet, so this is silence*/
 	.global tb_flush7
 tb_flush7:
-	.rept   10			/* R4: without this the first edge    */
+	.rept   13			/* R4: without this the first edge    */
 	nop				/* would be tau+50, inside the host's */
-	.endr				/* own EOP.  See the ledger above.    */
+	.endr				/* own EOP.  10 + the 2 that replace  */
+					/* K=7's share of the head pad.       */
 	b       .Ltb_head
 
 /* K = 0 is the one entry with no partial byte at all: the byte in flight
@@ -1407,18 +1454,23 @@ tb_flush6:	SEG6
 	.global usb_tb_head
 usb_tb_head:
 .Ltb_head:
-	.rept   4			/* R4 again, at the other end of the */
-	nop				/* spread: without these the earliest */
-	.endr				/* path (K=6, every branch at its     */
-					/* minimum) starts at tau+58, two     */
-					/* cycles inside the 2-bit-time floor.*/
+	/* The floor pad that used to be here is in EOPSTUB 6 now: it was only
+	 * ever K=6's, and here it was K=1's too.  audit_discarded.md SE.1. */
 	mov     r2, r14			/* 1  8-k, the unsampled slots       */
 	lsrs    r1, r5, #1		/* 1  \                              */
-	eors    r1, r5			/* 1   |                             */
-	mvns    r1, r1			/* 1   | NRZI over the whole byte    */
-	uxtb    r1, r1			/* 1   |                             */
+	eors    r1, r5			/* 1   | NRZI over the whole byte    */
+	mvns    r1, r1			/* 1   |                             */
 	lsls    r1, r1, r2		/* 1   | k real bits to the top      */
 	uxtb    r1, r1			/* 1  /                              */
+					/* The `uxtb` that used to sit before */
+					/* the shift had no reader: 8-k is    */
+					/* 1..7 here (K=0 has its own entry), */
+					/* a LEFT shift moves bits 8.. further */
+					/* up, and the uxtb below clears every */
+					/* one of them.  audit_discarded.md   */
+					/* A17.  Uniform across K, so it is    */
+					/* worth its cycle only because the    */
+					/* floor pad is per-K now (SE.1).      */
 	lsls    r2, r1, #28		/* 1  \                              */
 	lsrs    r2, r2, #26		/* 1   | low nibble * 4              */
 	mov     r8, r2			/* 1  /  parked for SEG1             */
@@ -1627,8 +1679,7 @@ rx_flush7:
 	lsrs    r1, r5, #1
 	eors    r1, r5
 	mvns    r1, r1
-	uxtb    r1, r1
-	lsls    r1, r1, r2
+	lsls    r1, r1, r2	/* the pre-shift uxtb had no reader: A17 */
 	uxtb    r1, r1
 	lsls    r2, r1, #28
 	lsrs    r2, r2, #26
@@ -2236,46 +2287,58 @@ ti_flush6:
 	.global usb_ti_head
 usb_ti_head:
 .Lti_head:
-	.rept   4
-	nop
-	.endr
+	/* as .Ltb_head: the floor pad is EOPSTUB 6's now */
 	mov     r2, r14			/* 1  8-k, the unsampled slots       */
 	lsrs    r1, r5, #1		/* 1  \                              */
-	eors    r1, r5			/* 1   |                             */
-	mvns    r1, r1			/* 1   | NRZI over the whole byte    */
-	uxtb    r1, r1			/* 1   |                             */
+	eors    r1, r5			/* 1   | NRZI over the whole byte    */
+	mvns    r1, r1			/* 1   |                             */
 	lsls    r1, r1, r2		/* 1   | k real bits to the top      */
-	uxtb    r1, r1			/* 1  /                              */
+	uxtb    r1, r1			/* 1  /  (the pre-shift uxtb: A17)   */
 	lsls    r2, r1, #28		/* 1  \                              */
 	lsrs    r2, r2, #26		/* 1   | low nibble * 4              */
 	mov     r8, r2			/* 1  /  parked for SEG1             */
 	lsrs    r1, r1, #4		/* 1  high nibble; r5 is now DEAD    */
-	SEG0				/* 7                                 */
 	TBARM				/* 13                                */
+					/* SEG0 used to be here.  Nothing    */
+					/* between the first wire edge and   */
+					/* cell C0 reads it, and the IN      */
+					/* chain's SYNC cells were carrying  */
+					/* 88 of their 112 free cycles - the */
+					/* token path has no SEG4 CRC step   */
+					/* and no SEG6 at all (find 1) - so  */
+					/* it rides in C0 and comes off the  */
+					/* deadline.  7 cycles at every K.   */
+					/* audit_discarded.md SE.4.  r1 and  */
+					/* r11 are all it needs and TBARM    */
+					/* writes neither (r2, r5, r6 only). */
 
 /* ---- eight SYNC cells: 2 of wire, 14 of receiver ----------------------- */
 	.set    BCYC, 16
 	TICELL  C0
-	SEG1
-	TBUSE   SEG1_CYC
-	SEG2_A
-	TBUSE   SEG2A_CYC
+	SEG0
+	TBUSE   SEG0_CYC_
+	SEG1_A
+	TBUSE   SEG1A_CYC
 
 	TICELL  C1
+	SEG1_B
+	TBUSE   SEG1B_CYC
+	SEG2_A
+	TBUSE   SEG2A_CYC
 	SEG2_B
 	TBUSE   SEG2B_CYC
-	SEG3_A
-	TBUSE   SEG3A_CYC
 
 	TICELL  C2
+	SEG3_A
+	TBUSE   SEG3A_CYC
 	SEG3_B
 	TBUSE   SEG3B_CYC
 	SEG3_TAIL
-	TBUSE   3
-	SEG5_A
-	TBUSE   SEG5A_CYC
+	TBUSE   2
 
 	TICELL  C3
+	SEG5_A
+	TBUSE   SEG5A_CYC
 	SEG5_B  .Lti_ovf
 	TBUSE   SEG5B_CYC
 

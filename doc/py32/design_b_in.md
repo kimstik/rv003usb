@@ -214,6 +214,8 @@ says. Where it disagrees with §1-6 the build wins and the line is named.
 **First wire edge, from τ, worst branch resolution, flash-resident,
 `USB_RX_CHECK=CRC16`, on the linked `demo_gamepad.elf`:**
 
+> **Superseded.** `audit_discarded.md` §F.6 measures this path at **τ+95**, 29 cycles of margin instead of 15. The table below is the build this section described.
+
 | K (cell SE0 was sampled in) | first edge | bit times after SE0→J |
 |---|---|---|
 | 1 | **τ+109** | **5.31** |

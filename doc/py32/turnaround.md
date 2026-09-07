@@ -752,6 +752,12 @@ wins and §8.3's line item is named.
 
 ### 11.1 The measurement
 
+> **Superseded.** `audit_discarded.md` §F.6 measures this path at **τ+108**,
+> 16 cycles of margin instead of 9, after three changes to the flush and the
+> floor pad (§E.1-E.3 there). The table below is the build this section
+> described and the shape of the argument is unchanged; the numbers are not
+> current.
+
 **First wire edge, from τ (the SE0-detecting `ldr`), worst branch
 resolution, flash-resident, `USB_RX_CHECK=CRC16`:**
 
