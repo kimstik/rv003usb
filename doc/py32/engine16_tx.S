@@ -340,6 +340,31 @@ usb_send_data:
 	mov     r7, r11
 	push    {r4-r7}
 
+	/* Design B (turnaround.md S7, engine16_merged.S) puts the DATA
+	 * handshake on the wire itself, from inside the receive ISR and
+	 * before the C layer is called at all.  The C layer is then called
+	 * anyway, with its source and its prototypes unchanged
+	 * (ENGINE16_SPEC.md S4), and rv003usb.c's just_ack ends every path
+	 * through usb_pid_handle_data with usb_send_data(0,0,2,0xD2).  That
+	 * call must not put a SECOND ACK on the bus, so the receive engine
+	 * leaves a one-shot flag here and this consumes it.  It is the whole
+	 * of turnaround.md S4.2's "compatibility cost", and it is paid on
+	 * this side of the seam rather than in rv003usb.c.
+	 *
+	 * One-shot, and cleared as it fires, so a lost or reordered call
+	 * cannot wedge the transmitter.  A user data handler that transmits
+	 * on its own must set RV003USB_USER_DATA_HANDLES_TOKEN, which
+	 * disables Design B outright - the same condition turnaround.md S4.2
+	 * states. */
+	ldr     r4, =usb_tx_suppress
+	ldrb    r5, [r4, #0]
+	cmp     r5, #0
+	beq     2f
+	movs    r5, #0
+	strb    r5, [r4, #0]
+	b       .Ltx_reject		/* nothing driven; pop and return    */
+2:
+
 	cmp     r1, #TX_MAXPAY		/* the only buffer bound, and it is  */
 	bhi     .Ltx_reject		/* enforced once, outside the timing */
 	cmp     r2, #0

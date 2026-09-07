@@ -181,6 +181,19 @@
 #endif
 #define USB_PINMASK     ((1 << USB_DP_BIT) | (1 << USB_DM_BIT))
 
+/* ---- transmit-side port constants, for the Design B response path -------
+ * Identical to engine16_tx.S's, and they must stay identical: the ACK this
+ * engine emits by itself and the packets usb_send_data emits drive the same
+ * two pins from the same GPIO.  MODER 0x00, BSRR 0x18 (BUILD_FACTS.md S7).
+ * Low speed: J = D- high / D+ low, K = D+ high / D- low, SE0 = both low. */
+#define USB_MODER_OFS   0x00
+#define USB_BSRR_OFS    0x18
+#define BSRR_J          ((1 << USB_DM_BIT) | (1 << (USB_DP_BIT + 16)))
+#define BSRR_SE0        (USB_PINMASK << 16)
+#define BSRR_TOGGLE     (USB_PINMASK | (USB_PINMASK << 16))
+#define MODER_MASK      ((3 << (2*USB_DP_BIT)) | (3 << (2*USB_DM_BIT)))
+#define MODER_OUT       ((1 << (2*USB_DP_BIT)) | (1 << (2*USB_DM_BIT)))
+
 /* EXTI, for the pending-flag acknowledge every ISR exit owes the NVIC.  The
  * flag is level-latched into the NVIC, so an ISR that returns without it is
  * re-entered immediately and forever.  Base 0x40021800, PR at 0x0C, line =
@@ -208,6 +221,35 @@
  * limit (see the note on VUSB's hang in the .md).  24 < 32, so the store is
  * bounded twice over: structurally by the mask, and by this. */
 #define USB_BYTE_LIMIT  24
+
+/* ---- the two side-channel bytes Design B needs, and why they are here ---
+ * turnaround.md S4 (P4): the dispatch decision has to go to memory, because
+ * every low register and r8-r12/r14 is live in the timed chain and there is
+ * nowhere to keep it.  It goes in the receive buffer, above the reach of the
+ * store: the emitted count is bounded to USB_BYTE_LIMIT = 24 by SEG5, so the
+ * masked index the store uses is at most 24 and the highest byte SEG3 can
+ * ever write is usb_rxbuf+2+24 = usb_rxbuf+26.  The buffer is
+ * USB_RXBUF_LEN+2 = 34 bytes, so usb_rxbuf+28 and +29 are inside the
+ * allocation and unreachable from the wire, for any input whatever.
+ * Offsets below are from r9, which is usb_rxbuf+2 (F-5).
+ *
+ *   +26 (usb_rxbuf+28)  TB_OWED  non-zero <=> the last packet this engine
+ *                       saw was a SETUP or OUT token addressed to us, so a
+ *                       DATA packet is expected next and a handshake is
+ *                       owed for it (turnaround.md S7.2).  This is the ONLY
+ *                       speculative bit in Design B and it is decided before
+ *                       the packet being answered even starts.
+ *   +27 (usb_rxbuf+29)  TB_PID   the PID byte that response will carry.  It
+ *                       is a PARAMETER, not a constant baked into the
+ *                       transmitter (turnaround.md S9, R5): the SYNC goes on
+ *                       the wire without it and it is not fetched until the
+ *                       eight SYNC bit times are over.
+ * Both are written only at the ISR exit (.Lusb_done / .Lusb_done_owed), i.e.
+ * never inside a bit cell, and .bss zero-init means TB_OWED is clear at
+ * reset. */
+#define TB_OWED_OFS     26
+#define TB_PID_OFS      27
+#define TB_PID_ACK      0xD2		/* ACK, the only PID a DATA is owed  */
 
 /* ------------------------------------------- the receive integrity check
  * USB_RX_CHECK selects WHAT this engine verifies before the control flow is
@@ -255,6 +297,22 @@
  * engine16_tx.S carries the same switch and must be built with the same
  * value: the tables are in that file and a table read from the wrong memory
  * costs 4 in SEG0, SEG1 and SEG2, which no cell can absorb. */
+/* ------------------------------------------ the Design B response path
+ * turnaround.md S7: the engine emits the DATA handshake itself, SYNC first
+ * and PID gated on the residue, without going through the C layer.  It is
+ * on by default because it is what makes the turnaround conformant at
+ * 24 MHz (S8.3).  It turns itself off under RV003USB_USER_DATA_HANDLES_TOKEN,
+ * where the response to a DATA packet is NOT a foregone conclusion and the
+ * user handler owns it (turnaround.md S4.2, rv003usb.c:359); with the option
+ * set the arming flag is never written, so the whole path is unreachable and
+ * the engine behaves exactly as it did before. */
+#ifdef  RV003USB_USER_DATA_HANDLES_TOKEN
+#define USB_TURNAROUND_B        0
+#endif
+#ifndef USB_TURNAROUND_B
+#define USB_TURNAROUND_B        1
+#endif
+
 #ifndef USB_ENGINE16_FLASH
 #define USB_ENGINE16_FLASH      1
 #endif
@@ -376,16 +434,34 @@ usb_rx_cell\idx:
 	ldr     r1, [r4, r1]		/* 2                                  */
 	.endm
 
-	.macro  SEG2			/* 9: append it; fetch the rxbuf base */
+/* Design B needs the flush cut finer than one segment per piece: eight TX
+ * cells of 14 free cycles each have to hold SEG1..SEG6 (61) plus the gate
+ * (36), and whole-segment packing strands 23 of the 112 (turnaround.md
+ * S7.4's "nine timed pieces").  So SEG2, SEG3, SEG5 and SEG6 are each
+ * expressed as two halves and the segment itself as their concatenation:
+ * the timed chain and the ordinary flush emit exactly the instruction
+ * stream they did before - the _A/_B pair is a source cut, not a code
+ * change, and the objdump before and after is identical - and the
+ * interleaved chain places the halves in different cells.  The cut points
+ * are where only r2 (or r1) crosses the boundary, because TBCELL's two
+ * instructions write r5 and the flags and nothing else; no cut separates a
+ * CMP from its branch. */
+	.macro  SEG2_A			/* 3                                  */
 	uxth    r2, r1			/* 1                                  */
 	mov     r11, r2			/* 1                                  */
 	lsls    r2, r1, #5		/* 1                                  */
+	.endm
+	.macro  SEG2_B			/* 6                                  */
 	lsrs    r2, r2, #29		/* 1                                  */
 	lsrs    r1, r1, #27		/* 1                                  */
 	lsls    r1, r1, r0		/* 1                                  */
 	adds    r3, r3, r1		/* 1                                  */
 	adds    r0, r0, r2		/* 1                                  */
 	mov     r1, r9			/* 1  buffer base, 32-byte aligned    */
+	.endm
+	.macro  SEG2			/* 9: append it; fetch the rxbuf base */
+	SEG2_A
+	SEG2_B
 	.endm
 
 /* SEG3 is the cell FLASH_TIMING.md measured at 18: its `strb` into rxbuf is
@@ -402,14 +478,20 @@ usb_rx_cell\idx:
  * back to back, so the untimed copy is unchanged instruction for
  * instruction. */
 #define SEG3_CYC        (6 + USB_RAM_ACCESS)
-	.macro  SEG3			/* 9/11: bounded store, commit mask   */
+	.macro  SEG3_A			/* 6/8                                */
 	mov     r2, r12			/* 1  emitted byte count              */
 	lsls    r2, r2, #USB_RXBUF_MASK	/* 1  \ BALANCE: index &= 31, so no   */
 	lsrs    r2, r2, #USB_RXBUF_MASK	/* 1  / store can leave the buffer    */
 	strb    r3, [r1, r2]		/* 2/4  speculative store of the byte */
 	subs    r0, r0, #8		/* 1  negative <=> byte not finished  */
+	.endm
+	.macro  SEG3_B			/* 2                                  */
 	asrs    r1, r0, #31		/* 1  -1 if NOT finished              */
 	mvns    r1, r1			/* 1  commit mask: -1 finished, 0 not */
+	.endm
+	.macro  SEG3			/* 9/11: bounded store, commit mask   */
+	SEG3_A
+	SEG3_B
 	.endm
 
 /* The three cycles SEG3 handed over.  They run at the head of every SEG4,
@@ -456,9 +538,11 @@ usb_rx_cell\idx:
 	.endm
 #endif
 
-	.macro  SEG5 ovf		/* 11: drop, advance, bound, gate     */
+	.macro  SEG5_A			/* 2                                  */
 	movs    r2, #8			/* 1                                  */
 	ands    r2, r1			/* 1  8 if a byte finished, else 0    */
+	.endm
+	.macro  SEG5_B ovf		/* 9                                  */
 	lsrs    r3, r3, r2		/* 1  drop the byte just emitted      */
 	mov     r2, r12			/* 1                                  */
 	subs    r2, r2, r1		/* 1  count += 1 only on a real byte  */
@@ -469,20 +553,30 @@ usb_rx_cell\idx:
 	asrs    r2, r2, #31		/* 1   | -1 while SYNC/PID not past   */
 	bics    r1, r2			/* 1  / commit mask &= (count >= 3)   */
 	.endm
+	.macro  SEG5 ovf		/* 11: drop, advance, bound, gate     */
+	SEG5_A
+	SEG5_B  \ovf
+	.endm
 
 #if USB_RX_CHECK == USB_RX_CHECK_CRC16
 #define SEG6_CYC 10
-	.macro  SEG6			/* 10: commit the CRC step, or not    */
+	.macro  SEG6_A			/* 5                                  */
 	mov     r2, r8			/* 1  parked table value              */
 	ands    r2, r1			/* 1  zero unless committing          */
 	mov     r8, r2			/* 1                                  */
 	movs    r2, #8			/* 1                                  */
 	ands    r2, r1			/* 1  shift 8 if committing, else 0   */
+	.endm
+	.macro  SEG6_B			/* 5                                  */
 	mov     r1, r10			/* 1                                  */
 	lsrs    r1, r1, r2		/* 1  crc>>8, or crc>>0               */
 	mov     r2, r8			/* 1                                  */
 	eors    r1, r2			/* 1  crc = (crc>>8) ^ T[..], or crc  */
 	mov     r10, r1			/* 1                                  */
+	.endm
+	.macro  SEG6			/* 10: commit the CRC step, or not    */
+	SEG6_A
+	SEG6_B
 	.endm
 #elif USB_RX_CHECK == USB_RX_CHECK_PARITY
 #define SEG6_CYC 10
@@ -494,20 +588,30 @@ usb_rx_cell\idx:
 	 * needs no commit mask of its own.
 	 * Only bit 0 of r10 is ever read; bits 1..7 collect the junk the
 	 * partial folds leave, and XOR is bitwise, so they cannot reach it. */
-	.macro  SEG6			/* 10: parity of the byte, into r10   */
+	.macro  SEG6_A			/* 5                                  */
 	mov     r1, r8			/* 1  the gated byte                  */
 	lsrs    r2, r1, #4		/* 1  \                               */
 	eors    r1, r2			/* 1   |                              */
 	lsrs    r2, r1, #2		/* 1   | bit 0 = parity of the byte   */
 	eors    r1, r2			/* 1   |                              */
+	.endm
+	.macro  SEG6_B			/* 5                                  */
 	lsrs    r2, r1, #1		/* 1   |                              */
 	eors    r1, r2			/* 1  /                               */
 	mov     r2, r10			/* 1  running parity                  */
 	eors    r2, r1			/* 1                                  */
 	mov     r10, r2			/* 1                                  */
 	.endm
+	.macro  SEG6			/* 10: parity of the byte, into r10   */
+	SEG6_A
+	SEG6_B
+	.endm
 #else
 #define SEG6_CYC 0
+	.macro  SEG6_A			/* 0                                  */
+	.endm
+	.macro  SEG6_B			/* 0                                  */
+	.endm
 	.macro  SEG6			/* 0: no receive check                */
 	.endm
 #endif
@@ -700,7 +804,18 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
 	movs    r1, #200		/* bounded spin (PRIOR_ART A-16)     */
 	b       .Lsync_hunt
 .Lgiveup:				/* in range of the hunt's B<cond>    */
-	b       .Lusb_done
+	ldr     r0, =(.Lusb_done + 1)	/* B no longer reaches: the Design B  */
+	bx      r0			/* block sits between here and there  */
+	.ltorg				/* Second entry pool.  The stubs below
+					 * grew when Design B's arming test
+					 * went into them (EOPSTUB), and the
+					 * entry's LDR-literals - which the
+					 * comment at the first .ltorg records
+					 * as already sitting 1016 of their
+					 * 1020-byte reach from it - went out
+					 * of range.  Nothing falls into this
+					 * one either: the B above is
+					 * unconditional. */
 
 /* ---- phase lock ---------------------------------------------------------
  * Exception entry on M0+ is ~15 cycles plus the instruction it interrupted,
@@ -723,18 +838,35 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
  * branch range, applied at the granularity where it still works).  r14 -
  * dead as the chain head the moment we leave the chain - carries the number
  * of wire-bit slots of the current byte that were never sampled. */
-rx_eop0:	movs    r2, #8
-	mov     r14, r2
-	b       rx_flush0
-rx_eop1:	movs    r2, #7
-	mov     r14, r2
-	b       rx_flush1
-rx_eop2:	movs    r2, #6
-	mov     r14, r2
-	b       rx_flush2
-rx_eop3:	movs    r2, #5
-	mov     r14, r2
-	b       rx_flush3
+/* The stub also makes Design B's only speculative decision (turnaround.md
+ * S7.2): if TB_OWED is set, the last packet was a SETUP or OUT token to this
+ * device, a DATA packet is what just ended, a handshake is owed for it, and
+ * the response path is taken.  If it is clear, nothing is owed and the
+ * ordinary flush runs exactly as before.  The test is 6 cycles (a RAM byte
+ * costs 4 from flash-resident code) and it is paid on both paths; on the
+ * ordinary one it lands in a tail that is already 200+ cycles long, and on
+ * the response one it is inside piece 0's slack.  r2 is the only free
+ * register here - r1 already carries the table entry SEG\idx will consume -
+ * which is why the base has to be re-fetched from r9 each time. */
+	.macro  EOPSTUB idx, unsampled
+rx_eop\idx:
+	movs    r2, #\unsampled	/* 1  wire-bit slots never sampled   */
+	mov     r14, r2			/* 1                                 */
+#if USB_TURNAROUND_B
+	mov     r2, r9			/* 1  rxbuf base                     */
+	ldrb    r2, [r2, #TB_OWED_OFS]	/* 4  is a response owed?            */
+	cmp     r2, #0			/* 1                                 */
+	beq     1f			/* 1 NOT TAKEN on the response path  */
+	b       tb_flush\idx		/* 2-3  yes: Design B                */
+1:
+#endif
+	b       rx_flush\idx		/* 2-3  no: the ordinary path        */
+	.endm
+
+	EOPSTUB 0, 8
+	EOPSTUB 1, 7
+	EOPSTUB 2, 6
+	EOPSTUB 3, 5
 
 .Lsync_hunt:
 .Lwait_j:				/* first get to a J cell             */
@@ -834,20 +966,554 @@ usb_rx_chain:
 	CELL_END
 
 /* EOP stubs for cells 4..7, and the overflow escape for SEG5 in cell 5. */
-rx_eop4:	movs    r2, #4
-	mov     r14, r2
-	b       rx_flush4
-rx_eop5:	movs    r2, #3
-	mov     r14, r2
-	b       rx_flush5
-rx_eop6:	movs    r2, #2
-	mov     r14, r2
-	b       rx_flush6
-rx_eop7:	movs    r2, #1
-	mov     r14, r2
-	b       rx_flush7
+	EOPSTUB 4, 4
+	EOPSTUB 5, 3
+	EOPSTUB 6, 2
+	EOPSTUB 7, 1
 .Lovf_a:
 	b       .Lusb_overrun
+
+/* ================= Design B: SYNC-first, PID-gated =======================
+ * turnaround.md S7.  SE0 is detected, the transmitter is armed, and eight
+ * bit times of SYNC go on the wire BEFORE the CRC verdict exists.  That is
+ * sound because SYNC carries no information: it is the same eight bits at
+ * the head of every packet, so emitting it commits to "a packet is coming",
+ * not to which packet (turnaround.md S6.2).  The PID - which is what
+ * actually says ACK - stays downstream of the residue compare, so a false
+ * ACK is structurally impossible.  Do not move the residue compare after
+ * the PID; that is the whole claim of this design.
+ *
+ * The receive flush rides in the free cycles of the SYNC cells, exactly as
+ * SEG0..SEG6 ride in the free cycles of the receive cells.  A SYNC bit
+ * costs TWO cycles here, not the transmit engine's five, because during
+ * SYNC the wire pattern is a compile-time constant - seven J<->K toggles
+ * and one hold - so there is no bit queue to shift and no stuff state to
+ * consult.  That leaves S = 14 free cycles per cell, 112 over the eight,
+ * against turnaround.md S8.3's feasibility condition of S >= 8.
+ *
+ * Register map while this runs.  r7 (GPIO base) is shared with the receive
+ * side unchanged, r6 (the D+|D- sample mask) is dead the moment SE0 is
+ * detected and is reused for the BSRR toggle word, and r5 (the wire packer)
+ * is dead the moment .Ltb_head has consumed it and is reused for the BSRR
+ * word currently driven.  Nothing else moves: r0-r4 stay the flush's, r8-r12
+ * stay the pipeline's, and the C-layer seam is untouched.
+ *
+ *   r5  the BSRR word on the wire    r6  BSRR_TOGGLE      r7  GPIO base
+ *   r4  table base, then the PID bit queue
+ *   r0,r1,r2,r3  the flush and the gate
+ *   r8,r9,r10,r11,r12  the receive pipeline, exactly as in the flush
+ *
+ * The cycle ledger, from tau (the SE0-detecting LDR), for the worst entry
+ * (every taken branch at 3):
+ *
+ *   detect ldr+ands+beq                  4..5
+ *   EOPSTUB incl. the TB_OWED test         12   ->  17
+ *   SEG_K..SEG6 of the byte in flight    B(K)   ->  17+B(K)
+ *   .Ltb_head: NRZI of the partial byte    11
+ *   SEG0 of the partial byte                7   ->  "flush piece 0"
+ *   TBARM (drive J, pins to output)        13
+ *   TBCELL 0: eors + str                    2   ->  FIRST WIRE EDGE
+ *
+ *   B(K):  K=1 61, K=2 50, K=3 41, K=4 31, K=5 21, K=6 10, K=7 0(+10 pad)
+ *   first edge:  K=1 tau+111   K=2 100   K=3 91   K=4 81
+ *                K=5 tau+71    K=6  60   K=7 63   K=0 103
+ *
+ * so the LATEST first response bit is tau+111 and the earliest tau+60,
+ * inside turnaround.md S2's [tau+60, tau+124] window at every K.  tau+111
+ * is (111-24)/16 = 5.44 bit times after SE0->J.
+ * ======================================================================== */
+#if USB_TURNAROUND_B
+
+/* A SYNC cell: two cycles of transmitter, fourteen of receiver.  Same
+ * accounting device as CELL - the ledger is assembled, not asserted. */
+	.set    BCYC, 16
+
+	.macro  TBCELL nm
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B SYNC cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 0
+	.global usb_tb_\nm
+usb_tb_\nm:
+	eors    r5, r6			/* 1  J <-> K                        */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1  the SYNC bit leaves here       */
+	.set    BCYC, 2
+	.endm
+
+/* SYNC is 00000001 LSB-first, i.e. seven NRZI transitions and then a hold.
+ * The last cell re-drives the level it is already at, so the store cadence
+ * stays exactly 16 cycles and the pin is asserted, not merely left. */
+	.macro  TBHOLD nm
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B SYNC cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 0
+	.global usb_tb_\nm
+usb_tb_\nm:
+	nop				/* 1  data 1 = no transition         */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1                                 */
+	.set    BCYC, 2
+	.endm
+
+	.macro  TBUSE n
+	.set    BCYC, BCYC + (\n)
+	.endm
+
+	.macro  TBPAD			/* close a cell that ends in a BX    */
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 16
+	.endm
+
+/* One PID/EOP bit cell.  Here the pattern is NOT a constant - R5 of
+ * turnaround.md S9 requires the response PID to be a parameter, and it is
+ * not fetched until the eight SYNC bit times are already on the wire - so
+ * this is the transmit engine's own five-cycle cell: shift the queue,
+ * toggle on a 0, store.  r4 is the queue, LSB first. */
+	.macro  TBBIT nm
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B PID cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 0
+	.global usb_tb_\nm
+usb_tb_\nm:
+	lsrs    r4, r4, #1		/* 1  C = the data bit               */
+	sbcs    r2, r2			/* 1  0 on a 1, -1 on a 0            */
+	ands    r2, r6			/* 1  the toggle word, or nothing    */
+	eors    r5, r2			/* 1  NRZI: toggle on 0              */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1                                 */
+	.set    BCYC, 5
+	.endm
+
+/* Arm the transmitter: 13 cycles, and it drives nothing until its eighth.
+ * ODR is written BEFORE MODER because the reset ODR is 0 on both pins,
+ * which is SE0 - making the pins outputs first would put an SE0 on the bus.
+ * turnaround.md S9 R3: do not drive before tau+40.  The MODER store is the
+ * 11th of these 13 cycles and the first wire edge is 4 cycles after it, so
+ * on the earliest path (K=6, first edge tau+60) it lands at tau+56. */
+	.macro  TBARM
+	ldr     r2, [r7, #USB_MODER_OFS]	/* 1                         */
+	ldr     r5, =MODER_MASK			/* 2                         */
+	bics    r2, r5				/* 1                         */
+	ldr     r5, =MODER_OUT			/* 2                         */
+	orrs    r2, r5				/* 1                         */
+	ldr     r5, =BSRR_J			/* 2                         */
+	str     r5, [r7, #USB_BSRR_OFS]		/* 1  ODR = J                */
+	str     r2, [r7, #USB_MODER_OFS]	/* 1  now the pins drive J   */
+	ldr     r6, =BSRR_TOGGLE		/* 2                         */
+	.endm					/* = 13                      */
+
+/* The response PID.  Five cycles, and they are the whole of R5: nothing
+ * about which packet this is has been decided before here. */
+	.macro  TBPIDLOAD
+	mov     r2, r9			/* 1  through r2, not r4: r4 is the  */
+	ldrb    r4, [r2, #TB_PID_OFS]	/* 4  TABLE base until this very     */
+	.endm				/* = 5   instruction, and pricing the*/
+					/*    load as a flash-table access   */
+					/*    would understate it by 2       */
+
+/* ---- the gate: everything that must be true before a PID may be emitted -
+ * 36 cycles at USB_RX_CHECK=CRC16, cut into four pieces that ride in cells
+ * 4, 5, 6 and 7.  It is the tail's validation with the token and handshake
+ * arms removed - the only PID this path can answer is DATA - plus the alias
+ * test .Ldata does.  Every branch is NOT TAKEN on the good path and costs 1;
+ * a taken one leaves the timed chain for .Ltb_abort, where timing no longer
+ * means anything because what is being emitted is deliberately a corrupt
+ * packet.  The ordinary tail still runs afterwards and re-validates from the
+ * same bytes before it calls C, so this gate is not the only check - but it
+ * IS the only thing between the wire and an ACK PID.
+ *
+ * The cut is four pieces rather than three because cell 7 also carries the
+ * BX into the PID chain, and a flash literal costs 2 from flash-resident
+ * code and 4 from RAM-resident code.  Three pieces fitted the flash column
+ * and overran the RAM one by a cycle - a hole the .error cannot see, because
+ * the ledger is what it checks.  Four pieces fit both columns and all three
+ * USB_RX_CHECK settings, which is why the sizes below are expressions and
+ * not constants. */
+	.macro  TBGATE_A		/* 4:  the stuffing violation        */
+	mov     r2, r11			/* 1  T_UT | state<<6                */
+	lsrs    r2, r2, #6		/* 1                                 */
+	cmp     r2, #((T_UT >> 6) + 7)	/* 1  sticky stuffing violation      */
+	beq     .Ltb_abort		/* 1                                 */
+	.endm
+
+	.macro  TBGATE_B		/* 10 + a RAM access: length, SYNC   */
+	mov     r0, r12			/* 1  emitted byte count             */
+	cmp     r0, #4			/* 1  SYNC + PID + CRC16 at least    */
+	blo     .Ltb_abort		/* 1                                 */
+	cmp     r0, #12			/* 1  longer than any legal LS packet*/
+	bhi     .Ltb_abort		/* 1                                 */
+	mov     r1, r9			/* 1                                 */
+	ldrh    r3, [r1, #0]		/* 2/4  SYNC and PID in ONE access - */
+					/*    rxbuf+2 is 2-aligned (F-5)     */
+	uxtb    r2, r3			/* 1  the SYNC byte                  */
+	cmp     r2, #0x80		/* 1  decodes to 0x80, oldest first  */
+	bne     .Ltb_abort		/* 1                                 */
+	lsrs    r3, r3, #8		/* 1  r3 = the PID byte              */
+	.endm
+
+	.macro  TBGATE_C		/* 12: the PID, three ways           */
+	lsrs    r2, r3, #4		/* 1                                 */
+	movs    r1, #0x0F		/* 1                                 */
+	ands    r1, r3			/* 1                                 */
+	eors    r2, r1			/* 1  high nibble must be ~low       */
+	cmp     r2, #0x0F		/* 1                                 */
+	bne     .Ltb_abort		/* 1                                 */
+	movs    r2, #3			/* 1                                 */
+	ands    r2, r3			/* 1  PID type field                 */
+	cmp     r2, #3			/* 1  DATA0/DATA1 and nothing else   */
+	bne     .Ltb_abort		/* 1                                 */
+	lsls    r2, r3, #29		/* 1  PID bit 2 -> sign              */
+	bmi     .Ltb_abort		/* 1  DATA2/MDATA: not on an LS bus  */
+	.endm
+
+#if USB_RX_CHECK == USB_RX_CHECK_CRC16
+	.macro  TBGATE_D		/* 6:  THE RESIDUE                   */
+	mov     r1, r10			/* 1  the running CRC16              */
+	movs    r2, #0xB0		/* 1  \ 0xB001, built rather than    */
+	lsls    r2, r2, #8		/* 1   | loaded: no literal pool in   */
+	adds    r2, #1			/* 1  / range matters inside a cell  */
+	cmp     r1, r2			/* 1  Everything below this line is  */
+	bne     .Ltb_abort		/* 1  downstream of it.              */
+	.endm
+#elif USB_RX_CHECK == USB_RX_CHECK_PARITY
+	.macro  TBGATE_D		/* 3                                 */
+	mov     r1, r10			/* 1                                 */
+	lsrs    r1, r1, #1		/* 1  C = accumulated parity         */
+	bcc     .Ltb_abort		/* 1                                 */
+	.endm
+#else
+	/* USB_RX_CHECK_NONE: there is no residue to gate on, so the ACK is
+	 * downstream of nothing but the PID tests.  That is the documented
+	 * meaning of this setting - it is what V-USB, Grainuum and LemcUSB
+	 * ship (CRC_ALTERNATIVES.md S9.1) - and it degrades Design B's
+	 * no-false-ACK property exactly as far as it degrades the ordinary
+	 * tail's, which is all the way.  Do not select it and then quote
+	 * turnaround.md S7.3. */
+	.macro  TBGATE_D		/* 0                                 */
+	.endm
+#endif
+
+	.macro  TBPADTO n		/* pad this cell up to \n cycles     */
+	.if     BCYC > (\n)
+	.error  "engine16_merged: Design B cell over budget"
+	.endif
+	.rept   (\n) - BCYC
+	nop
+	.endr
+	.set    BCYC, (\n)
+	.endm
+
+/* Declared costs of the segment halves, so the cell ledger below is
+ * assembled rather than asserted.  They track the macros above. */
+#define SEG0_CYC        7
+#define SEG1_CYC        11
+#define SEG2A_CYC       3
+#define SEG2B_CYC       6
+#define SEG3A_CYC       (4 + USB_RAM_ACCESS)
+#define SEG3B_CYC       2
+#define SEG5A_CYC       2
+#define SEG5B_CYC       9
+#if USB_RX_CHECK == USB_RX_CHECK_NONE
+#define SEG6A_CYC       0
+#define SEG6B_CYC       0
+#else
+#define SEG6A_CYC       5
+#define SEG6B_CYC       5
+#endif
+/* GATE1 ends with an LDRH out of rxbuf and TBPIDLOAD with an LDRB out of
+ * it, and rxbuf is RAM: 4 cycles from flash-resident code, 2 from RAM-
+ * resident.  Declaring them as constants made cells B4 and B5 come out at
+ * 14 real cycles in the RAM-resident build while the assembler's ledger
+ * still read 16 - a two-cycle hole in the SYNC cadence that the .error
+ * cannot see, because the ledger is what it checks. */
+#define GATEA_CYC       4
+#define GATEB_CYC       (10 + USB_RAM_ACCESS)
+#define GATEC_CYC       12
+#if USB_RX_CHECK == USB_RX_CHECK_CRC16
+#define GATED_CYC       6
+#elif USB_RX_CHECK == USB_RX_CHECK_PARITY
+#define GATED_CYC       3
+#else
+#define GATED_CYC       0
+#endif
+#define PIDLOAD_CYC     (1 + USB_RAM_ACCESS)
+/* A PC-relative literal is 2 cycles from flash-resident code and 4 from
+ * RAM-resident code (ENGINE16_SPEC.md S2).  Cells B7 and A4 end in
+ * LDR-literal + BX and the difference lands inside them. */
+#if USB_ENGINE16_FLASH
+#define LIT_CYC         2
+#else
+#define LIT_CYC         4
+#endif
+
+/* ---- piece 0: from the EOP stub to the first wire edge ------------------
+ * The byte in flight is finished here, untimed, exactly as the ordinary
+ * flush finishes it - same macros, so the two copies cannot drift - and so
+ * is the NRZI decode of the partial byte and its SEG0.  Everything after
+ * SEG0 rides in the SYNC cells.
+ *
+ * turnaround.md S8.3 pads piece 0 to a constant 100-A cycles so the first
+ * edge is always at tau+112.  That is not done here and must not be: the
+ * work in piece 0 varies by 61 cycles between K=1 and K=7, the legal window
+ * for the first response bit is [tau+60, tau+124] and is only 64 cycles
+ * wide, and padding every K up to the worst one buys nothing - a response
+ * that starts at tau+71 is as conformant as one that starts at tau+111, and
+ * cheaper.  Only K=7, which would otherwise start at tau+50 and violate the
+ * 2-bit-time MINIMUM of S7.1.18 (turnaround.md S9 R4), is padded, and it is
+ * padded to the floor and not to the ceiling. */
+.Lovf_c:
+	b       .Ltb_dropped		/* overflow in piece 0: nothing has   */
+					/* been driven yet, so this is silence*/
+	.global tb_flush7
+tb_flush7:
+	.rept   10			/* R4: without this the first edge    */
+	nop				/* would be tau+50, inside the host's */
+	.endr				/* own EOP.  See the ledger above.    */
+	b       .Ltb_head
+
+/* K = 0 is the one entry with no partial byte at all: the byte in flight
+ * completed on the cell boundary, and r14 = 8 says none of the next byte's
+ * bit slots were sampled.  Feeding the eight unsampled slots through the
+ * pipeline anyway is not an option - they decode as eight data 0s, which
+ * completes a spurious byte, advances the emitted count and folds a wrong
+ * byte into the CRC - so K=0 gets its own entry and its own first five SYNC
+ * cells, and rejoins the shared chain at cell 5 where the gate begins. */
+	.global tb_flush0
+tb_flush0:
+	SEG0
+	SEG1
+	SEG2
+	SEG3
+	SEG4
+	SEG5    .Lovf_c
+	SEG6
+	b       .Ltb_arm_k0
+	.global tb_flush1
+tb_flush1:	SEG1
+	.global tb_flush2
+tb_flush2:	SEG2
+	.global tb_flush3
+tb_flush3:	SEG3
+	.global tb_flush4
+tb_flush4:	SEG4
+	.global tb_flush5
+tb_flush5:	SEG5    .Lovf_c
+	.global tb_flush6
+tb_flush6:	SEG6
+
+/* The partial byte's NRZI decode.  This is the last reader of r5, which is
+ * what frees it to become the BSRR word the SYNC cells drive.  Unlike the
+ * ordinary flush there is no "r14 == 8" test here: K=0 never reaches this
+ * code. */
+	.global usb_tb_head
+usb_tb_head:
+.Ltb_head:
+	.rept   4			/* R4 again, at the other end of the */
+	nop				/* spread: without these the earliest */
+	.endr				/* path (K=6, every branch at its     */
+					/* minimum) starts at tau+58, two     */
+					/* cycles inside the 2-bit-time floor.*/
+	mov     r2, r14			/* 1  8-k, the unsampled slots       */
+	lsrs    r1, r5, #1		/* 1  \                              */
+	eors    r1, r5			/* 1   |                             */
+	mvns    r1, r1			/* 1   | NRZI over the whole byte    */
+	uxtb    r1, r1			/* 1   |                             */
+	lsls    r1, r1, r2		/* 1   | k real bits to the top      */
+	uxtb    r1, r1			/* 1  /                              */
+	lsls    r2, r1, #28		/* 1  \                              */
+	lsrs    r2, r2, #26		/* 1   | low nibble * 4              */
+	mov     r8, r2			/* 1  /  parked for SEG1             */
+	lsrs    r1, r1, #4		/* 1  high nibble; r5 is now DEAD    */
+	SEG0				/* 7  the last of piece 0            */
+	TBARM				/* 13                                */
+
+/* ---- the eight SYNC cells: 2 cycles of wire, 14 of receive engine ------- */
+	TBCELL  B0
+	SEG1
+	TBUSE   SEG1_CYC
+	SEG2_A
+	TBUSE   SEG2A_CYC
+
+	TBCELL  B1
+	SEG2_B
+	TBUSE   SEG2B_CYC
+	SEG3_A
+	TBUSE   SEG3A_CYC
+
+	TBCELL  B2
+	SEG3_B
+	TBUSE   SEG3B_CYC
+	SEG4
+	TBUSE   SEG4_CYC
+	SEG5_A
+	TBUSE   SEG5A_CYC
+
+	TBCELL  B3
+	SEG5_B  .Lovf_d			/* the bound is still enforced, and   */
+	TBUSE   SEG5B_CYC		/* now it aborts a packet in flight   */
+	SEG6_A
+	TBUSE   SEG6A_CYC
+
+	TBCELL  B4
+	SEG6_B
+	TBUSE   SEG6B_CYC
+	TBPIDLOAD			/* the flush is finished; r4 is free  */
+	TBUSE   PIDLOAD_CYC
+	TBGATE_A
+	TBUSE   GATEA_CYC
+
+	TBCELL  B5			/* <- K=0 joins here                  */
+	TBGATE_B
+	TBUSE   GATEB_CYC
+
+	TBCELL  B6
+	TBGATE_C
+	TBUSE   GATEC_CYC
+
+	TBHOLD  B7
+	TBGATE_D			/* THE RESIDUE.  Fall through = ACK.  */
+	TBUSE   GATED_CYC
+	movs    r0, #1			/* 1  "a PID went out" - read by the  */
+	TBUSE   1			/*    EOP, which is shared with abort */
+	TBPADTO (16 - LIT_CYC - 3)
+	ldr     r2, =(.Ltb_pid + 1)	/* 2/4                                */
+	bx      r2			/* 3  flat 3: no 2-vs-3 in a cell     */
+	TBUSE   (LIT_CYC + 3)
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B SYNC cell 7 is not 16 cycles"
+	.endif
+.Lovf_d:
+	b       .Ltb_abort
+	.ltorg
+
+/* ---- the abort ---------------------------------------------------------
+ * turnaround.md S6.4 and S7.3.  Stop toggling: with no store the pins keep
+ * driving the level the last SYNC cell left, and an unchanging level is a
+ * run of consecutive 1s in NRZI.  Seven of them is a bit stuff violation,
+ * which every receiver must detect (S7.1.9), and the eight bits decoded in
+ * the PID position are 0xFF, whose nibbles are not complements, so the PID
+ * check fails too (S8.3.1).  Then a proper EOP, because a packet that never
+ * ends is not a case the specification describes (S6.3).
+ *
+ * What the host does with it: it discards the packet, sees no valid
+ * handshake for the data stage, and retries - which is correct, because the
+ * device did not accept the data and did not toggle its sequence bit.  The
+ * honest limit of the argument is in turnaround.md S6.4: S8.4.5 says be
+ * silent on a CRC error and this is not silent.  What it is, is
+ * indistinguishable at the host's receiver from a handshake the BUS
+ * corrupted - a failure mode every host is already required to handle. */
+.Ltb_abort:
+	movs    r1, #40			/* 40 * (subs + taken bne) = 120..160 */
+1:	subs    r1, #1			/* cycles = 7.5..10 bit times of an   */
+	bne     1b			/* unchanging level.  >= 7 is needed.  */
+	movs    r0, #0			/* no PID went out                    */
+	b       .Ltb_eop
+
+/* ---- K = 0: arm, then five SYNC cells of its own ----------------------- */
+.Ltb_arm_k0:
+	TBARM
+	TBCELL  A0
+	TBPADTO 16
+	TBCELL  A1
+	TBPADTO 16
+	TBCELL  A2
+	TBPADTO 16
+	TBCELL  A3
+	TBPADTO 16
+	TBCELL  A4
+	TBPIDLOAD
+	TBUSE   PIDLOAD_CYC
+	TBGATE_A			/* K=0 skips cell B4, so it carries   */
+	TBUSE   GATEA_CYC		/* B4's piece of the gate itself      */
+	TBPADTO (16 - LIT_CYC - 3)
+	ldr     r2, =(usb_tb_B5 + 1)	/* 2/4  join the shared chain at the  */
+	bx      r2			/* 3    cell where the gate resumes   */
+	TBUSE   (LIT_CYC + 3)
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B cell A4 is not 16 cycles"
+	.endif
+
+/* ---- the PID: eight cells, and only now is it known ------------------- */
+	.set    BCYC, 16
+.Ltb_pid:
+	TBBIT   P0
+	TBBIT   P1
+	TBBIT   P2
+	TBBIT   P3
+	TBBIT   P4
+	TBBIT   P5
+	TBBIT   P6
+	TBBIT   P7
+	TBPADTO 16
+	/* No bit stuffing is needed and none is done.  A legal PID is
+	 * (~n<<4)|n, so its longest run of 1s is four; SYNC ends with one
+	 * data 1, so the longest run this packet can present is five, and
+	 * the rule inserts a 0 only after six.  ACK (0xD2) runs to two. */
+
+/* ---- EOP: SE0 for two bit times, driven J for one, then release -------- */
+.Ltb_eop:
+	nop				/* 1                                 */
+	nop				/* 1                                 */
+	lsrs    r2, r6, #16		/* 1  \ the toggle word's reset half */
+	lsls    r2, r2, #16		/* 1  / = both pins low = SE0        */
+	str     r2, [r7, #USB_BSRR_OFS]	/* 1  =5, on the same cadence        */
+	.rept   11
+	nop
+	.endr				/* =16                               */
+	ldr     r2, =BSRR_J		/* 2  built in the spare cycles of   */
+	.rept   14			/*    the second SE0 bit time        */
+	nop
+	.endr				/* =16                               */
+	nop
+	nop
+	nop
+	nop
+	str     r2, [r7, #USB_BSRR_OFS]	/* 1  =5  driven J for one bit time  */
+	.rept   11
+	nop
+	.endr				/* =16                               */
+
+	/* Untimed from here.  Release the pins; the pull-up holds J. */
+	ldr     r1, =MODER_MASK
+	ldr     r2, [r7, #USB_MODER_OFS]
+	bics    r2, r1
+	str     r2, [r7, #USB_MODER_OFS]
+
+	cmp     r0, #0
+	beq     .Ltb_dropped
+	/* The ACK is on the wire.  The C layer is called AFTERWARDS, through
+	 * the ordinary tail and with the seam unchanged (ENGINE16_SPEC.md
+	 * S4): .Lrx_tail re-validates from the same buffer bytes and reaches
+	 * usb_pid_handle_data with the same prototype it always had.  The one
+	 * thing that must not happen twice is the handshake, and
+	 * rv003usb.c's just_ack unconditionally calls usb_send_data - so the
+	 * transmitter is told to swallow exactly one call.  The C source does
+	 * not change; usb_send_data is ours. */
+	ldr     r4, =usb_tables		/* the table base, clobbered by the  */
+					/* PID load, and .Lrx_tail's token   */
+					/* arm would want it                 */
+	movs    r1, #1
+	ldr     r2, =usb_tx_suppress
+	strb    r1, [r2]
+	b       .Lrx_tail
+.Ltb_dropped:
+	b       .Lusb_done
+	.ltorg
+#endif	/* USB_TURNAROUND_B */
 
 /* ===================== flush: finish the pipeline, untimed ================
  * Entering at rx_flushK means "SE0 was sampled in cell K, so segments
@@ -1073,7 +1739,8 @@ rx_flush7:
 .Lt_setup:
 	bl      usb_pid_handle_setup
 	add     sp, #4
-	b       .Lusb_done
+	b       .Lusb_done_owed		/* a DATA packet follows; we owe it  */
+					/* an ACK - turnaround.md S7.2       */
 .Lt_in:
 	bl      usb_pid_handle_in
 	add     sp, #4
@@ -1081,7 +1748,7 @@ rx_flush7:
 .Lt_out:
 	bl      usb_pid_handle_out
 	add     sp, #4
-	b       .Lusb_done
+	b       .Lusb_done_owed
 
 .Lhandshake:
 	cmp     r0, #2			/* SYNC + PID + EOP and nothing else */
@@ -1128,7 +1795,28 @@ rx_flush7:
 	 * index is masked - so this is a liveness escape, not a memory fix. */
 	b       .Lusb_done
 
+/* The two exits differ in one thing: whether the packet just handled was a
+ * SETUP or OUT token addressed to this device, in which case the host will
+ * send a DATA packet next and this engine owes it a handshake.  That, and
+ * the PID the handshake will carry, are the whole of Design B's pre-staged
+ * state (see TB_OWED_OFS).  Writing them HERE - after the C dispatch, past
+ * every timed path - is what makes turnaround.md S7.2's claim true: the
+ * arming decision never depends on anything that arrives in the last bit
+ * times of the packet being answered.
+ * Every path out of the tail passes through one of these two labels, so the
+ * flag is one-shot: it is cleared by the very packet it armed.  The
+ * keepalive exit does NOT pass through here, deliberately - a keep-alive EOP
+ * between the token and its data must not disarm us. */
+.Lusb_done_owed:
+	movs    r0, #USB_TURNAROUND_B
+	movs    r1, #TB_PID_ACK
+	b       1f
 .Lusb_done:
+	movs    r0, #0
+	movs    r1, #0
+1:	mov     r2, r9
+	strb    r0, [r2, #TB_OWED_OFS]
+	strb    r1, [r2, #TB_PID_OFS]
 	/* Acknowledge last, not first: our own transmission has toggled D- by
 	 * now and set the flag again, so clearing here is what makes the ISR
 	 * run once per packet - the predecessor's interrupt_complete does the
@@ -1193,3 +1881,14 @@ rx_flush7:
 	.global usb_rxbuf
 usb_rxbuf:
 	.space  USB_RXBUF_LEN + 2	/* +2: see the note at USB_RXBUF_LEN */
+
+/* Set by the Design B path when it has already put the handshake on the
+ * wire; usb_send_data (engine16_tx.S) consumes it and returns without
+ * transmitting.  This is what lets the C layer keep calling
+ * usb_send_data(0,0,2,0xD2) from just_ack with its source unchanged
+ * (turnaround.md S4.2).  One byte, written only outside every timed path. */
+	.section .bss.usb_tx_suppress, "aw", %nobits
+	.balign 4
+	.global usb_tx_suppress
+usb_tx_suppress:
+	.space  1

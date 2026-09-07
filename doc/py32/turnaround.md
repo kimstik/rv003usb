@@ -1,5 +1,14 @@
 # turnaround — getting a response onto the wire inside §7.1.18
 
+> **Status: Design B (§7) is built and measured. See §11.** The worst-case
+> first response bit is **τ+115 = 5.69 bit times** after SE0→J, against a
+> deadline of τ+124 and a requirement of 6.5 — so the DATA→ACK path is
+> conformant at 24 MHz. §8.3's ledger does not survive contact with the real
+> flush: `A` is 13 rather than 30, the flush is 176 cycles rather than 102,
+> and the design fits only because a SYNC bit cell costs 2 cycles rather than
+> the transmit engine's 5. §11.2 has the arithmetic. The IN→DATA direction is
+> **not** built.
+
 The receive engine is finished and exact (`engine16_merged.md`). The one thing
 it does not do is answer in time. This note establishes what "in time" is in
 cycles, re-derives the measurement against the *specification's* reference
@@ -732,3 +741,296 @@ Stated rather than buried.
   (`merged.md` §4.4); exception entry latency is unmeasured and is *not* in
   that figure. If entry latency has run-to-run variation it lands directly on
   τ and therefore on every deadline in this document.
+
+---
+
+## 11. Design B, as built and measured
+
+§7 is implemented in `engine16_merged.S` and `engine16_tx.S`. This section is
+what the build says, not what the design said; where the two disagree the build
+wins and §8.3's line item is named.
+
+### 11.1 The measurement
+
+**First wire edge, from τ (the SE0-detecting `ldr`), worst branch
+resolution, flash-resident, `USB_RX_CHECK=CRC16`:**
+
+| K (cell SE0 was sampled in) | first edge | bit times after SE0→J |
+|---|---|---|
+| 1 | **τ+115** | **5.69** |
+| 2 | τ+104 | 5.00 |
+| 3 | τ+95 | 4.44 |
+| 4 | τ+85 | 3.81 |
+| 5 | τ+75 | 3.19 |
+| 6 | τ+64 | 2.50 |
+| 7 | τ+67 | 2.69 |
+| 0 | τ+103 | 4.94 |
+
+Best branch resolution moves each row down by 2 cycles; K=6 at τ+62 is the
+earliest edge the engine can produce.
+
+**Against the two limits of §2:** the deadline is τ+124 and the worst case is
+τ+115, so there are **9 cycles of margin**; the floor is τ+60 and the earliest
+case is τ+62, so there are **2**. Against the 6.5 bit-time requirement the
+worst case is 5.69. **The stack is conformant to §7.1.18 at 24 MHz on the
+DATA→ACK path.**
+
+Every figure comes from `tools/engine16_cyc.py --exec flash --ioport r7
+--flashdata r4` on the *linked image*, block by block, with each taken branch
+priced at 3 and each not-taken at 1:
+
+```
+detect      ldr + ands + beq              4..5
+rx_eopK     movs, mov, mov, ldrb, cmp,
+            beq(nt), b                   11..12   -> tau+15..17
+tb_flushK   SEG_K..SEG6, byte in flight    B(K)   B(1)=61 B(2)=50 B(3)=41
+                                                  B(4)=31 B(5)=21 B(6)=10
+                                                  B(7)=12..13 (pad) B(0)=70..71
+usb_tb_head 4 pad + NRZI 11 + SEG0 7 + TBARM 13 = 35
+TBCELL B0   eors + str                         2   -> FIRST WIRE EDGE
+```
+
+`B(K)`, `usb_tb_head` = 35 and every cell below are printed by the tool; they
+are not hand sums.
+
+**Every timed cell is exactly 16 cycles**, measured on the linked ELF, at both
+`USB_RX_CHECK=1` and `=2`:
+
+```
+usb_tb_B0..B7   16   the eight SYNC cells (B3..B6 print 16..22 because the
+                     tool prices a conditional branch 1..3; every one of them
+                     is NOT TAKEN on the good path and the taken case leaves
+                     the chain)
+usb_tb_A0..A4   16   the K=0 entry's own five
+usb_tb_P0..P7   16   the PID
+                16   three EOP cells, walked by hand in objdump: SE0 store at
+                     cycle 5, second SE0 bit time, driven J at cycle 5
+```
+
+and the same at all six combinations of `USB_RX_CHECK` (0/1/2) and
+`USB_ENGINE16_FLASH` (0/1). The RAM-resident column found a real defect and is
+worth recording: cells B7 and A4 end in `ldr r2,=<target>` + `bx`, and a
+PC-relative literal is 2 cycles from flash-resident code and **4 from
+RAM-resident code** (`ENGINE16_SPEC.md` §2). With the gate cut into three
+pieces both cells came out at 18 real cycles in that build while the
+assembler's own ledger still read 16 — a two-cycle hole in the SYNC cadence
+that `.error` cannot see, because the ledger is what it checks. Two other
+declarations had the same shape: `TBGATE_B`'s `ldrh` and `TBPIDLOAD`'s `ldrb`
+both reach `rxbuf`, which is RAM, and both were declared as constants. All
+three are now expressions in `USB_RAM_ACCESS` and `LIT_CYC`, and the gate is
+cut into **four** pieces so cell 7 carries only the residue test and the exit.
+The lesson is the one the tool's own header states: an assembled ledger checks
+the ledger, not the silicon, and a cost that depends on the memory column has
+to be written as a cost that depends on the memory column.
+
+### 11.2 Where §8.3's ledger is wrong
+
+| §8.3 line | as designed | as built | why |
+|---|---|---|---|
+| SE0 detect + stub | 10..12 | **15..17** | the stub now reads the "response owed" byte, and a RAM byte is 4 cycles from flash-resident code |
+| TX register load | `A` = 30 | **13** | see below |
+| flush piece 0 | `100 − A` = 70 | 79..92 | the real flush, not the stripped one |
+| flush total | 102 | **176** | see below |
+| first wire edge | τ+112, constant | τ+62..115, varying | see §11.3 |
+
+**`A` is 13, not 30.** `engine16_tx.md` §5.2's 30 cycles is the cost of a
+pre-staged entry into *`usb_send_data`*: a twelve-word register image loaded
+with three `ldm` bursts, because the transmit chain needs a bit queue, a stuff
+state, a CRC accumulator, a source pointer, two buffer anchors and a table
+base before its first cell can run. **Design B needs none of them during
+SYNC.** The SYNC pattern is a compile-time constant, so the arm is the GPIO
+port and nothing else: read MODER, mask, set both pins to output, write J to
+ODR first so the pins never become outputs holding the reset ODR (which is
+SE0), and load the BSRR toggle word. Thirteen cycles, two of the three
+literals in a pool 2 cycles away, and it does not touch `usb_send_data` at all.
+
+R1 asked for A "from a hot handover". The honest answer this build gives is
+that the question was aimed at the wrong entry point: the transmitter Design B
+needs is not the transmitter §9 was interviewing.
+
+**The flush is 176 cycles, not 102.** §8.3's 102 is `turnaround_sketch.S` —
+the flush with SEG3..SEG6 collapsed into a branching `FEMIT`, the loop bound
+dropped and the constant-time machinery removed (§5). This build does not use
+it. It uses `engine16_merged.S`'s own `SEG` macros, so the interleaved copy and
+the timed chain cannot drift, which is §7.4's first cost and the one
+`merged.md` §7 says has already bitten once. Measured, worst case (K=1):
+
+```
+  byte in flight   SEG1..SEG6                61
+  partial byte     NRZI decode               11
+                   SEG0..SEG6                68
+  gate             stuffing (cell 4), bounds
+                   and SYNC (5), PID
+                   complement, type and
+                   alias (6), residue (7)    36
+                                            ---
+                                            176
+```
+
+**So the feasibility condition of §8.3 does not hold at S = 8.** It reads
+`100 − A + 8S ≥ 102`; with the real numbers it is `(piece 0) + 8S ≥ 176`, and
+at S = 8 that is 79 + 64 = 143 < 176. **Design B as §8.3 costed it does not
+fit.** What makes it fit is that a SYNC bit does not cost the transmit
+engine's five cycles:
+
+```
+  eors r5, r6            1      J <-> K
+  str  r5, [r7, #BSRR]   1      IOPORT
+```
+
+two cycles, no queue, no stuff state, no table, and no register the receive
+flush wants — r6 is the D+/D- sample mask, dead the instant SE0 is detected,
+and r5 is the wire packer, dead the instant the partial byte's NRZI decode has
+consumed it. **S = 14, not 8**, so the cells hold 112 cycles against the 97 the
+flush and gate need there, and R6 is satisfied with 15 to spare.
+
+That is the correction that matters, and it runs the other way from the other
+two: §8.3 costed the SYNC cells as if they were transmit cells, and they are
+not.
+
+### 11.3 The constant first edge is not implemented, and should not be
+
+§8.3 pads piece 0 so the first edge is at τ+112 for every K. This build does
+not, for an arithmetic reason:
+
+* the legal window for the first response bit is `[τ+60, τ+124]`, **64 cycles
+  wide** (§2);
+* the work in piece 0 varies by **61 cycles** between K=1 and K=7, because
+  `B(K)` is how much of the byte in flight is left;
+* so a *shared* cut point between piece 0 and the cells forces the edge to move
+  with K, and only 3 cycles of the window are left over.
+
+Two ways out. Pad every K up to the worst — which is what §8.3 does, costs
+about 380 instructions of nop sled or a computed jump, and buys nothing,
+because a response that starts at τ+75 is exactly as conformant as one that
+starts at τ+115. Or let the edge move and pad only the entries that would
+otherwise start *before* the two-bit-time minimum of §7.1.18 (R4). This build
+does the second: `tb_flush7` carries 10 nops, `usb_tb_head` carries 4, and
+those 14 cycles are the whole of the padding in the design.
+
+The floor is the tighter of the two limits here. Without `usb_tb_head`'s four
+nops the earliest path (K=6, every branch resolving at its minimum) starts at
+τ+58, two cycles inside the floor. That is 0.125 bit times and no host would
+notice, and it is still wrong; the four nops cost 0.25 bit times at the other
+end and the worst case is τ+115 instead of τ+111.
+
+### 11.4 What "do not emit" looks like on the wire
+
+§7.3's abort, implemented at `.Ltb_abort`: **stop toggling**, then EOP, then
+release. Concretely, the engine leaves the pins driving whatever level the last
+SYNC cell wrote, spins 120..160 cycles (7.5..10 bit times), drives SE0 for two
+bit times, drives J for one, and releases MODER.
+
+Verified rather than assumed, in this order:
+
+1. **The host's bit-stuff detector fires first.** An unchanging line level is a
+   run of consecutive 1s in NRZI. The abort holds for ≥7 bit times against a
+   rule that inserts a 0 after 6 (§7.1.9), so the violation is present before
+   the host has finished decoding the field the PID would have occupied. Bit
+   stuff error is one of the packet error categories a receiver **must** detect
+   (§8.7).
+2. **The PID check fails independently.** The eight bits the host decodes in
+   the PID position are all 1s = 0xFF, whose upper nibble is not the complement
+   of its lower nibble (§8.3.1). Two independent detections, either sufficient.
+3. **The packet ends.** The EOP is emitted, so the host's receiver sees a
+   terminating event rather than a packet that never ends (§6.3). What the host
+   holds afterwards is a packet it must discard, no valid handshake for the data
+   stage, and therefore a retry — which is correct, because the device did not
+   accept the data and did not toggle its sequence bit (§8.6). The same DATAx
+   arrives again and is processed once.
+
+What is **not** claimed: that this is silence. §8.4.5 says be silent on a CRC
+error and this is not silent; §6.4 already states that and states the limit of
+the argument, which is that the corrupt packet is indistinguishable at the
+host's receiver from a handshake the *bus* corrupted. This build does not
+strengthen that argument; it implements it.
+
+The abort is reached from three places — the stuffing/bounds/PID gate, the
+residue compare, and the receive engine's own `USB_BYTE_LIMIT` bound in SEG5 —
+and all three are conditional branches that are **not taken** on the good path.
+A taken one costs 2-3 instead of 1 and the cell it leaves is short by 1-2
+cycles; that is deliberate and it is the only place the 2-vs-3 ambiguity
+touches this design, because by then what is being emitted is a packet whose
+whole purpose is to be detectably wrong.
+
+The one abort that must *not* drive is §6.5's token-address alias, where two
+devices could be answering. It does not arise on this path: Design B arms only
+for a DATA packet, and a DATA packet has no address field.
+
+### 11.5 The no-false-ACK property, stated as control flow
+
+```
+usb_tb_B7:  nop ; str r5,[r7,#BSRR]        SYNC bit 7 - the eighth bit time
+            mov  r1,r10                        the running CRC16
+            movs r2,#0xB0 ; lsls r2,#8 ; adds r2,#1
+            cmp  r1,r2    ; bne  .Ltb_abort    <-- THE RESIDUE
+            movs r0,#1
+            nop ; nop
+            ldr  r2,=(.Ltb_pid+1) ; bx r2      <-- the only way to a PID
+```
+
+There is exactly one path from this engine to a PID cell and it passes through
+`cmp r1,r2 / bne`. The PID byte itself is not even *fetched* until cell B4, and
+it is fetched from memory rather than being an immediate, which is R5: at arm
+time nothing about which packet this will be has been decided.
+
+### 11.6 The 18-cycle transmit cells are not involved
+
+`engine16_tx.S`'s own header records that cells S0..S5 and S7 measure 18 from
+flash, because `TXSEG0`'s `ldrb` and `TXSEG2`/`TXSEG3`'s `strb` reach
+`usb_txbuf`, which is RAM. Re-measured here, unchanged: 9 blocks over budget.
+
+**Design B uses none of them.** Its SYNC, PID and EOP cells are new code in
+`engine16_merged.S` and the only memory they touch is the GPIO port over
+IOPORT, at 1 cycle. The one RAM access anywhere in the interleaved chain is
+`SEG3`'s `strb` into `rxbuf` — the receive engine's own, already priced at 4 in
+`SEG3_CYC`, and cell B1 is `SEG2_B` (6) + `SEG3_A` (8) = 14 exactly because of
+it. So the outstanding transmit item neither blocks this work nor is fixed by
+it, and it still needs its own redistribution before `usb_send_data` can be
+called conformant for the IN→DATA direction.
+
+### 11.7 Footprint
+
+`INTEGRATION_BUILD.md`'s recipe, PY32F002Bx5, gamepad demo, calibration on,
+all objects deleted first:
+
+| | RAM | FLASH |
+|---|---|---|
+| before, `USB_RX_CHECK=2` | 984 B | 5156 B |
+| **after** | **984 B** | **6436 B** |
+| before, `USB_RX_CHECK=1` | 984 B | 5140 B |
+| after | 984 B | 6412 B |
+
+**+1280 B of flash, no RAM.** The two staging bytes live inside `usb_rxbuf`,
+above the reach of the store (the emitted count is bounded to 24, so the
+highest byte `SEG3` can write is `usb_rxbuf+26`), and the one-byte suppression
+flag lands in alignment slack. The flash goes on the second instantiation of
+`SEG0..SEG6` for the K=0 entry, the eight SYNC cells and the K=0 entry's own
+five, the eight PID cells, the EOP, and about 200 bytes of nop padding.
+
+`usb_rx_engine16`, `tb_flush0..7`, `usb_tb_B0..B7`, `usb_tb_A0..A4` and
+`usb_tb_P0..P7` are all present in the linked ELF — the trap
+`INTEGRATION_BUILD.md` records, where `--gc-sections` silently discards an
+unreferenced engine, was checked for.
+
+### 11.8 What is not built
+
+* **IN → DATA0/DATA1.** §7.3 gives the IN token the PID's 128 cycles to
+  produce a payload from `usb_pid_handle_in`. That is a second machine — a
+  timed chain that calls C from inside a bit cell — and it is not here. Design
+  B as built arms **only** for a DATA packet, i.e. only for the DATA→ACK
+  direction, which is the one §4.2 shows needs no decision from C at all. An IN
+  token still goes the ordinary way and is still non-conformant.
+* **A bit-exact model of the emitted wire.** `engine16_tx.md` §6 drives the
+  transmit engine's instruction stream against an independent reference encoder
+  over 433 packets. Nothing equivalent exists for this path; the SYNC and ACK
+  wire pattern was walked by hand (seven toggles, one hold, then
+  toggle/hold/toggle/toggle/hold/toggle/hold/hold for 0xD2 LSB-first, which is
+  the reference NRZI encoding of SYNC+ACK with no stuffing, since a legal PID's
+  longest run of 1s is four and SYNC contributes one more).
+* **Anything on hardware.** No part of this has been on a bus.
+* **The residual of §7.2.** The arming bit says "the last packet was a SETUP or
+  OUT token addressed to us". If the DATA packet the host owes never arrives
+  and something else arrives instead, the engine emits SYNC and then aborts.
+  The protocol does not do that, and the flag is one-shot, but it is a
+  speculation and this is what it costs when it is wrong.
