@@ -251,6 +251,49 @@
 #define TB_PID_OFS      27
 #define TB_PID_ACK      0xD2		/* ACK, the only PID a DATA is owed  */
 
+/* ---- Design B, the IN direction (design_b_in.md) -----------------------
+ * The ACK direction's speculative bit is decided by the PREVIOUS packet.
+ * An IN token has no predecessor that identifies it, so the stub reads the
+ * received PID out of the buffer as well - a second 4-cycle RAM byte, and
+ * design_b_in.md S2 is where the 17 cycles that pay for it come from.
+ *
+ * One arm record per endpoint, in RAM, written only outside every timed
+ * path.  The record holds the packet ALREADY RENDERED TO WIRE BITS: NRZI is
+ * "toggle on 0" and so is not in the data, but bit stuffing and the CRC16
+ * ARE, so the payload cells have no pipeline at all - five cycles of
+ * transmitter and nothing else.  That is what makes the IN direction fit a
+ * 16-cycle cell when engine16_tx.S's own cells measure 18 (turnaround.md
+ * S11.6): the work is not made cheaper, it is moved off the wire.
+ *
+ *   +0  u16 tokpat   the ONE legal (byte2,byte3) halfword for "IN, this
+ *                    device, this endpoint" - address, endpoint and CRC5
+ *                    together (turnaround.md S4.1).  Zero = not armed, and
+ *                    zero is not a legal pattern: CRC5 of the all-zero
+ *                    field is 0x02, so byte3 is at least 0x10.
+ *   +2  u8  pid      0xC3 (DATA0) or 0x4B (DATA1), from e->toggle_in
+ *   +3  u8  groups   whole 8-bit groups of rendered wire bits
+ *   +4  u32 tail     the code pointer the payload chain jumps to when the
+ *                    whole groups are done: usb_ti_T(8-t) for a final
+ *                    partial group of t = nbits & 7 bits, or .Lti_eop when
+ *                    the stream ends on a group boundary
+ *   +8  u8  bits[TI_BITS_BYTES]   the stuffed data-bit stream, LSB first,
+ *                    payload then CRC16.  Max is 8 payload + 2 CRC = 80
+ *                    bits, plus at most 13 stuff bits = 93 -> 12 bytes, plus
+ *                    one pad byte because the chain prefetches one group
+ *                    ahead and the last prefetch reads past the end. */
+#ifndef USB_TURNAROUND_B_IN
+#define USB_TURNAROUND_B_IN     USB_TURNAROUND_B
+#endif
+#define TI_PAT_OFS      0
+#define TI_PID_OFS      2
+#define TI_GROUPS_OFS   3
+#define TI_TAIL_OFS     4
+#define TI_BITS_OFS     8
+#define TI_BITS_BYTES   13
+#define TI_REC_SIZE     32		/* power of two: the index is a shift */
+#define TI_REC_SHIFT    5
+#define TI_PID_IN       0x69		/* the token PID this path answers   */
+
 /* ------------------------------------------- the receive integrity check
  * USB_RX_CHECK selects WHAT this engine verifies before the control flow is
  * allowed to reach the ACK PID.  The ordering property (turnaround.md, A-9)
@@ -860,6 +903,22 @@ rx_eop\idx:
 	b       tb_flush\idx		/* 2-3  yes: Design B                */
 1:
 #endif
+#if USB_TURNAROUND_B_IN
+	/* The IN arm, and it is DOWNSTREAM of the ACK test on purpose: an IN
+	 * token has no predecessor that identifies it, so this path has to
+	 * read the PID out of the buffer - a second 4-cycle RAM byte - and
+	 * putting it first would charge those cycles to the DATA->ACK path
+	 * that turnaround.md S11 already measured at tau+115.  Here the IN
+	 * stub costs 21 against the ACK stub's 12, and design_b_in.md S2's
+	 * 17 absent CRC16 cycles pay for it twice over. */
+	mov     r2, r9			/* 1                                 */
+	ldrb    r2, [r2, #1]		/* 4  the RECEIVED PID byte          */
+	cmp     r2, #TI_PID_IN		/* 1                                 */
+	bne     2f			/* 1 NOT TAKEN on the IN path        */
+	ldr     r2, =(ti_flush\idx + 1)	/* 2/4  the IN chain is past a B's   */
+	bx      r2			/* 3    reach from here              */
+2:
+#endif
 	b       rx_flush\idx		/* 2-3  no: the ordinary path        */
 	.endm
 
@@ -867,6 +926,12 @@ rx_eop\idx:
 	EOPSTUB 1, 7
 	EOPSTUB 2, 6
 	EOPSTUB 3, 5
+	/* A literal pool for the four stubs above: the IN arm reaches its
+	 * flush chain through LDR-literal + BX (the chain is past a B's
+	 * range) and the entry's pool is 0x444 back, outside the +-1020 an
+	 * LDR-literal has.  Nothing falls into it - every stub ends in an
+	 * unconditional B. */
+	.ltorg
 
 .Lsync_hunt:
 .Lwait_j:				/* first get to a J cell             */
@@ -1495,6 +1560,7 @@ usb_tb_head:
 
 	cmp     r0, #0
 	beq     .Ltb_dropped
+.Ltb_sent:
 	/* The ACK is on the wire.  The C layer is called AFTERWARDS, through
 	 * the ordinary tail and with the seam unchanged (ENGINE16_SPEC.md
 	 * S4): .Lrx_tail re-validates from the same buffer bytes and reaches
@@ -1513,6 +1579,8 @@ usb_tb_head:
 .Ltb_dropped:
 	b       .Lusb_done
 	.ltorg
+
+
 #endif	/* USB_TURNAROUND_B */
 
 /* ===================== flush: finish the pipeline, untimed ================
@@ -1619,7 +1687,7 @@ rx_flush7:
  * (verified numerically here, and the same constant rv003usb.S:519 uses). */
 .Ldata:
 	cmp     r0, #4			/* SYNC + PID + CRC16 at least       */
-	blo     .Lusb_done
+	blo     .Ldone_t
 	/* CRC_ROUND2.md S1.4: the complement test above admits four PIDs of
 	 * type 3, and only two of them are legal on a low-speed bus - DATA0
 	 * (0xC3) and DATA1 (0x4B).  The other two are DATA2 (0x87) and MDATA
@@ -1631,12 +1699,12 @@ rx_flush7:
 	 * separates them, and a packet that reached here with 0x87 or 0x0F is
 	 * either corrupt or not addressed to a low-speed device. */
 	lsls    r1, r5, #29		/* PID bit 2 -> sign: DATA2 or MDATA */
-	bmi     .Lusb_done
+	bmi     .Ldone_t
 #if USB_RX_CHECK == USB_RX_CHECK_CRC16
 	mov     r1, r10
 	ldr     r2, =0x0000B001
 	cmp     r1, r2
-	bne     .Lusb_done
+	bne     .Ldone_t
 #elif USB_RX_CHECK == USB_RX_CHECK_PARITY
 	/* r10 bit 0 is the XOR of the per-byte parities of every emitted
 	 * byte - SYNC, PID and the data field.  parity(SYNC=0x80) = 1 and
@@ -1651,7 +1719,7 @@ rx_flush7:
 	 * so the 2..6.5 bit-time turnaround does not get worse. */
 	mov     r1, r10
 	lsrs    r1, r1, #1		/* C = accumulated parity            */
-	bcc     .Lusb_done
+	bcc     .Ldone_t
 #endif
 	subs    r3, r0, #1		/* F-4: the C layer's convention is  */
 					/* payload + 3 (rv003usb.c:300 does  */
@@ -1668,13 +1736,16 @@ rx_flush7:
 	push    {r4}			/* 5th argument is on the stack      */
 	bl      usb_pid_handle_data
 	add     sp, #4
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+	bl      .Lin_refresh
+#endif
 	b       .Lusb_done
 
 /* Token: CRC5 over the eleven address/endpoint bits plus the five CRC bits
  * leaves the constant residue 0x06 (verified numerically here). */
 .Ltoken:
 	cmp     r0, #4
-	bne     .Lusb_done
+	bne     .Ldone_t
 	movs    r3, #0x1F		/* CRC5 init                         */
 	ldrb    r0, [r6, #2]
 	bl      .Lcrc5_byte
@@ -1739,11 +1810,51 @@ rx_flush7:
 .Lt_setup:
 	bl      usb_pid_handle_setup
 	add     sp, #4
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+	bl      .Lin_refresh
+#endif
 	b       .Lusb_done_owed		/* a DATA packet follows; we owe it  */
 					/* an ACK - turnaround.md S7.2       */
 .Lt_in:
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+	/* Learn the arm pattern rather than compute it.  CRC5 has just been
+	 * checked, the endpoint bounded and the address filtered, so
+	 * rxbuf[2..3] is a VERIFIED "IN, this device, this endpoint" halfword
+	 * - exactly the one value the gate compares against (design_b_in.md
+	 * S6).  A CRC5 computed here would be the same number arrived at the
+	 * long way, and it would have to be recomputed whenever the device
+	 * address changes; a learned pattern re-learns itself.
+	 * r2 is the endpoint and r6 the rxbuf base, both still live; r0-r3
+	 * are the call's arguments and are not touched. */
+	ldrh    r6, [r6, #2]		/* the token halfword                */
+	lsls    r5, r2, #TI_REC_SHIFT
+	ldr     r7, =usb_in_arm
+	adds    r7, r7, r5
+	ldrh    r5, [r7, #TI_PAT_OFS]
+	cmp     r5, r6			/* already armed for exactly this    */
+	beq     1f			/* token?  Then the response was     */
+					/* the pre-rendered one, no endpoint */
+					/* state has moved, and re-rendering */
+					/* it would only call the user's IN  */
+					/* handler a second time.            */
+	movs    r5, #0
+	strh    r5, [r7, #TI_PAT_OFS]	/* disarm NOW: only a completed      */
+					/* render re-arms, so a handler that */
+					/* sends nothing leaves nothing armed*/
+	ldr     r7, =usb_in_pend
+	strh    r6, [r7, #0]
+	strb    r2, [r7, #3]
+	movs    r6, #1
+	strb    r6, [r7, #2]		/* one-shot: usb_send_data renders   */
+1:
+#endif
 	bl      usb_pid_handle_in
 	add     sp, #4
+	/* No refresh here.  An IN token changes no endpoint state - e->count
+	 * and e->toggle_in move on the host's ACK, not on the token - so the
+	 * record the call above just rendered is the right one until that ACK
+	 * arrives, and calling the user's IN handler a second time per token
+	 * would be visible to it for nothing. */
 	b       .Lusb_done
 .Lt_out:
 	bl      usb_pid_handle_out
@@ -1761,7 +1872,67 @@ rx_flush7:
 	push    {r4}
 	bl      usb_pid_handle_ack
 	add     sp, #4
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+	bl      .Lin_refresh
+#endif
 	b       .Lusb_done
+
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+/* ---- re-render the armed IN response ----------------------------------
+ * The arm record holds a packet, not a promise, so it goes stale the moment
+ * the state that produced it moves: usb_pid_handle_ack flips e->toggle_in
+ * and advances e->count, usb_pid_handle_data fills in what the data stage
+ * will return, and usb_pid_handle_setup resets both.  After each of them
+ * this calls usb_pid_handle_in for the endpoint that changed, with the
+ * transmitter suppressed, so the only effect is that usb_send_data renders
+ * the NEXT response into the record.
+ *
+ * This is the additional call ENGINE16_SPEC.md S4 allows and it is not a
+ * replacement: usb_pid_handle_in keeps its prototype and the C source is
+ * unchanged.  It is safe to call early because it mutates nothing the next
+ * IN depends on - e->count and e->toggle_in move only in
+ * usb_pid_handle_ack and usb_pid_handle_setup, and ist->current_endpoint is
+ * set to the value it already has.  What it DOES do is evaluate the payload
+ * one transaction early, and design_b_in.md S9 lists the three places where
+ * that is visible.
+ *
+ * usb_in_pend's pattern is left at zero, meaning "keep the one already
+ * learned": a refresh knows the endpoint but has no token in front of it. */
+	.thumb_func
+.Lin_refresh:
+	/* Four words, not five: every other call in this tail is reached with
+	 * SP at the alignment `push {r4}` then makes 8-aligned for the AAPCS,
+	 * and an odd-sized frame here would invert that for the call below.
+	 * lr rides in r7 and comes back in it. */
+	mov     r7, lr
+	push    {r4-r7}
+	ldr     r4, =rv003usb_internal_data
+	ldrb    r2, [r4, #0]		/* ist->current_endpoint, offset 0 at */
+	cmp     r2, #ENDPOINTS		/* both settings of TURBO8TYPE        */
+	bhs     1f
+	ldr     r7, =usb_in_pend
+	lsls    r5, r2, #TI_REC_SHIFT
+	ldr     r6, =usb_in_arm
+	adds    r6, r6, r5
+	ldrh    r5, [r6, #TI_PAT_OFS]	/* carry the learned pattern across   */
+	strh    r5, [r7, #0]		/* the rebuild...                     */
+	movs    r5, #0
+	strh    r5, [r6, #TI_PAT_OFS]	/* ...and disarm until it completes   */
+	strb    r2, [r7, #3]
+	movs    r6, #1
+	strb    r6, [r7, #2]
+	ldr     r7, =usb_tx_suppress	/* render, do not transmit            */
+	strb    r6, [r7, #0]
+	mov     r1, r9			/* a 4-aligned scratchpad: rxbuf+4,   */
+	adds    r1, r1, #2		/* whose packet has been handled      */
+	movs    r0, #0
+	movs    r3, #0
+	push    {r4}
+	bl      usb_pid_handle_in
+	add     sp, #4
+1:	pop     {r4-r7}
+	bx      r7
+#endif
 
 /* CRC5, one byte, two nibble steps.  r3 = crc, r0 = byte, r4 = table base. */
 .Lcrc5_byte:
@@ -1853,8 +2024,741 @@ rx_flush7:
 #endif
 	pop     {r4-r7, pc}
 
+/* ======================= Design B, the IN direction =======================
+ * design_b_in.md.  Same shape as the DATA->ACK path above and three things
+ * different:
+ *
+ *   1. The arming decision is made from the packet IN FLIGHT, not from its
+ *      predecessor, so the EOP stub reads usb_rxbuf+1 - a second RAM byte,
+ *      9 cycles - and it is placed downstream of the ACK test so the ACK
+ *      path measured at tau+115 pays none of it.
+ *   2. A TOKEN NEEDS NO CRC16.  SEG4's table step and the whole of SEG6
+ *      compute a residue that .Ltoken never reads, so this flush drops them:
+ *      17 cycles, twice what the second RAM read cost (design_b_in.md S2).
+ *   3. The response carries a PAYLOAD, and the payload is not produced here.
+ *      It was rendered to wire bits - stuffed, CRC16 appended, LSB first -
+ *      by usb_send_data on an earlier transaction, into the endpoint's arm
+ *      record.  So the payload cell is five cycles of transmitter and no
+ *      pipeline at all, which is why it holds 16 where engine16_tx.S's own
+ *      cells measure 18 (turnaround.md S11.6).  The work is not cheaper; it
+ *      is off the wire.
+ *
+ * The gate ends at ONE comparison - the received (byte2,byte3) halfword
+ * against the arm record's pattern - and that comparison is the address,
+ * the endpoint, the CRC5 and "is anything rendered for this endpoint"
+ * simultaneously (turnaround.md S4.1).  A DATA0/DATA1 PID is downstream of
+ * it, exactly as the ACK PID is downstream of the residue.
+ * ======================================================================== */
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+
+/* SYNC and payload cells.  Identical machinery to TBCELL/TBHOLD/TBBIT, own
+ * labels so the two chains are separable in a disassembly and in the tool's
+ * per-block output. */
+	.macro  TICELL nm
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B IN cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 0
+	.global usb_ti_\nm
+usb_ti_\nm:
+	eors    r5, r6			/* 1  J <-> K                        */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1                                 */
+	.set    BCYC, 2
+	.endm
+
+	.macro  TIHOLD nm
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B IN cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 0
+	.global usb_ti_\nm
+usb_ti_\nm:
+	nop				/* 1  data 1 = no transition         */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1                                 */
+	.set    BCYC, 2
+	.endm
+
+	.macro  TIBIT nm
+	.if     BCYC > 16
+	.error  "engine16_merged: Design B IN cell over 16 cycles"
+	.endif
+	.rept   16 - BCYC
+	nop
+	.endr
+	.set    BCYC, 0
+	.global usb_ti_\nm
+usb_ti_\nm:
+	lsrs    r4, r4, #1		/* 1  C = the data bit               */
+	sbcs    r2, r2			/* 1  0 on a 1, -1 on a 0            */
+	ands    r2, r6			/* 1                                 */
+	eors    r5, r2			/* 1  NRZI: toggle on 0              */
+	str     r5, [r7, #USB_BSRR_OFS]	/* 1                                 */
+	.set    BCYC, 5
+	.endm
+
+/* ---- the gate, in the pieces the cells can hold ------------------------ */
+	.macro  TIG1			/* 4:  the stuffing violation        */
+	mov     r2, r11			/* 1                                 */
+	lsrs    r2, r2, #6		/* 1                                 */
+	cmp     r2, #((T_UT >> 6) + 7)	/* 1                                 */
+	beq     .Lti_abt		/* 1                                 */
+	.endm
+#define TIG1_CYC        4
+
+	.macro  TIG2			/* 3:  a token is exactly 4 bytes    */
+	mov     r0, r12			/* 1  emitted byte count             */
+	cmp     r0, #4			/* 1  SYNC + PID + 2, and no other   */
+	bne     .Lti_abt		/* 1  length is a token              */
+	.endm
+#define TIG2_CYC        3
+
+	.macro  TIG3			/* 1 + a RAM access                  */
+	mov     r1, r9			/* 1  rxbuf base                     */
+	ldrh    r3, [r1, #0]		/* 2/4  SYNC and PID in one access   */
+	.endm
+#define TIG3_CYC        (1 + USB_RAM_ACCESS)
+
+	.macro  TIG4			/* 6:  SYNC byte, then the PID       */
+	uxtb    r2, r3			/* 1                                 */
+	cmp     r2, #0x80		/* 1  SYNC decodes to 0x80           */
+	bne     .Lti_abt		/* 1                                 */
+	lsrs    r3, r3, #8		/* 1  the PID byte                   */
+	cmp     r3, #TI_PID_IN		/* 1  and it must be IN.  The stub   */
+	bne     .Lti_abt		/* 1  read the same byte; this reads */
+	.endm				/*    it again rather than trust it  */
+#define TIG4_CYC        6
+
+	.macro  TIG5			/* a RAM access: the token halfword  */
+	ldrh    r2, [r1, #2]		/* 2/4  rxbuf+2 is 2-aligned (F-5)   */
+	.endm
+#define TIG5_CYC        USB_RAM_ACCESS
+
+/* endp = (b2>>7) | ((b3 & 7) << 1), and with the two bytes already in one
+ * register that is bits 10..7 of the halfword: one shift and a mask. */
+	.macro  TIG6			/* 5:  the endpoint, bounded         */
+	lsrs    r0, r2, #7		/* 1                                 */
+	lsls    r0, r0, #28		/* 1  \ & 0x0F                       */
+	lsrs    r0, r0, #28		/* 1  /                              */
+	cmp     r0, #ENDPOINTS		/* 1  eps[] is the last member of    */
+	bhs     .Lti_abt		/* 1  the struct (F-3)               */
+	.endm
+#define TIG6_CYC        5
+
+	.macro  TIG7			/* 2 + a literal: the arm record     */
+	lsls    r0, r0, #TI_REC_SHIFT	/* 1                                 */
+	ldr     r1, =usb_in_arm		/* 2/4                               */
+	adds    r1, r1, r0		/* 1                                 */
+	.endm
+#define TIG7_CYC        (2 + LIT_CYC)
+
+	.macro  TIG8			/* a RAM access: the armed pattern   */
+	ldrh    r3, [r1, #TI_PAT_OFS]	/* 2/4                               */
+	.endm
+#define TIG8_CYC        USB_RAM_ACCESS
+
+/* THE COMPARISON.  One CMP settles the device address, the endpoint, the
+ * CRC5 over both of them, and whether a packet has been rendered for this
+ * endpoint at all - because the pattern is written only when one is
+ * (turnaround.md S4.1).  Everything below this line is downstream of it, so
+ * a DATA0/DATA1 PID for a token this device was not asked for, or was not
+ * ready for, is structurally impossible. */
+	.macro  TIG9			/* 2                                 */
+	cmp     r3, r2			/* 1                                 */
+	bne     .Lti_abt		/* 1                                 */
+	.endm
+#define TIG9_CYC        2
+
+	.macro  TIPIDLOAD		/* a RAM access: DATA0 or DATA1      */
+	ldrb    r4, [r1, #TI_PID_OFS]	/* 2/4  from e->toggle_in, decided   */
+	.endm				/*    at render time, not here       */
+#define TIPIDLOAD_CYC   USB_RAM_ACCESS
+
+/* ---- flush piece 0: no CRC16 anywhere in it ---------------------------- */
+.Lti_ovf0:				/* overflow before anything is driven */
+	ldr     r2, =(.Lusb_done + 1)	/* so this is silence, and the tail   */
+	bx      r2			/* is out of a B's reach from here    */
+
+	.global ti_flush7
+ti_flush7:
+	.rept   10			/* R4, as tb_flush7: without it the   */
+	nop				/* first edge is inside the host's EOP*/
+	.endr
+	b       .Lti_head
+
+	.global ti_flush0
+ti_flush0:
+	SEG0
+	SEG1
+	SEG2
+	SEG3
+	SEG3_TAIL
+	SEG5    .Lti_ovf0
+	b       .Lti_arm_k0
+	.global ti_flush1
+ti_flush1:	SEG1
+	.global ti_flush2
+ti_flush2:	SEG2
+	.global ti_flush3
+ti_flush3:	SEG3
+	.global ti_flush4
+ti_flush4:	SEG3_TAIL		/* SEG4 without its CRC16 step       */
+	.global ti_flush5
+ti_flush5:	SEG5    .Lti_ovf0
+	.global ti_flush6		/* SEG6 is gone entirely             */
+ti_flush6:
+
+	.global usb_ti_head
+usb_ti_head:
+.Lti_head:
+	.rept   4
+	nop
+	.endr
+	mov     r2, r14			/* 1  8-k, the unsampled slots       */
+	lsrs    r1, r5, #1		/* 1  \                              */
+	eors    r1, r5			/* 1   |                             */
+	mvns    r1, r1			/* 1   | NRZI over the whole byte    */
+	uxtb    r1, r1			/* 1   |                             */
+	lsls    r1, r1, r2		/* 1   | k real bits to the top      */
+	uxtb    r1, r1			/* 1  /                              */
+	lsls    r2, r1, #28		/* 1  \                              */
+	lsrs    r2, r2, #26		/* 1   | low nibble * 4              */
+	mov     r8, r2			/* 1  /  parked for SEG1             */
+	lsrs    r1, r1, #4		/* 1  high nibble; r5 is now DEAD    */
+	SEG0				/* 7                                 */
+	TBARM				/* 13                                */
+
+/* ---- eight SYNC cells: 2 of wire, 14 of receiver ----------------------- */
+	.set    BCYC, 16
+	TICELL  C0
+	SEG1
+	TBUSE   SEG1_CYC
+	SEG2_A
+	TBUSE   SEG2A_CYC
+
+	TICELL  C1
+	SEG2_B
+	TBUSE   SEG2B_CYC
+	SEG3_A
+	TBUSE   SEG3A_CYC
+
+	TICELL  C2
+	SEG3_B
+	TBUSE   SEG3B_CYC
+	SEG3_TAIL
+	TBUSE   3
+	SEG5_A
+	TBUSE   SEG5A_CYC
+
+	TICELL  C3
+	SEG5_B  .Lti_ovf
+	TBUSE   SEG5B_CYC
+
+	TICELL  C4			/* <- K=0 joins here: the flush is    */
+	TIG1				/*    over and the gate begins        */
+	TBUSE   TIG1_CYC
+	TIG2
+	TBUSE   TIG2_CYC
+	TIG3
+	TBUSE   TIG3_CYC
+
+	TICELL  C5
+	TIG4
+	TBUSE   TIG4_CYC
+	TIG5
+	TBUSE   TIG5_CYC
+
+	TICELL  C6
+	TIG6
+	TBUSE   TIG6_CYC
+	TIG7
+	TBUSE   TIG7_CYC
+	TIG8
+	TBUSE   TIG8_CYC
+
+	TIHOLD  C7			/* SYNC bit 7: data 1, no transition */
+	TIG9				/* THE COMPARISON                    */
+	TBUSE   TIG9_CYC
+	TIPIDLOAD			/* and only now the PID              */
+	TBUSE   TIPIDLOAD_CYC
+	TBPADTO (16 - LIT_CYC - 3)
+	ldr     r2, =(.Lti_pid + 1)	/* 2/4                               */
+	bx      r2			/* 3                                 */
+	TBUSE   (LIT_CYC + 3)
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B IN cell C7 is not 16 cycles"
+	.endif
+
+/* The gate's rejects and SEG5's byte bound both land here.  It is a
+ * trampoline because a Thumb conditional branch reaches +-254 bytes and the
+ * abort is a chain of cells away; nothing falls into it - cell C7 ends in a
+ * BX - and it costs 2-3 cycles on a path that is about to spend 160 doing
+ * nothing. */
+.Lti_ovf:
+.Lti_abt:
+	b       .Lti_abort
+
+/* ---- K = 0: no partial byte, so no flush at all - four cells of its own,
+ * then the shared chain from the cell where the gate begins. ------------- */
+.Lti_arm_k0:
+	TBARM
+	.set    BCYC, 16
+	TICELL  E0
+	TBPADTO 16
+	TICELL  E1
+	TBPADTO 16
+	TICELL  E2
+	TBPADTO 16
+	TICELL  E3
+	TBPADTO (16 - LIT_CYC - 3)
+	ldr     r2, =(usb_ti_C4 + 1)	/* 2/4                               */
+	bx      r2			/* 3                                 */
+	TBUSE   (LIT_CYC + 3)
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B IN cell E3 is not 16 cycles"
+	.endif
+	.ltorg
+#endif	/* USB_TURNAROUND_B && USB_TURNAROUND_B_IN */
+
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+/* ---- the PID: eight cells, and the payload chain set up in their slack --
+ * The PID byte reached r4 in cell C7, downstream of the one comparison that
+ * validates the token (TIG9).  These eight cells put it on the wire and, in
+ * the eleven cycles each has left, load everything the payload chain needs:
+ *
+ *   r0  whole 8-bit groups of rendered wire bits still to send
+ *   r1  the byte pointer into the record's rendered stream
+ *   r4  the bit queue (the PID until cell Q7, then group 0)
+ *   r8  the group prefetched one group ahead
+ *   r10 (loop target) XOR (tail target) - the branch-free dispatch below
+ *   r14 the tail target, a code pointer stored in the record at render time
+ *
+ * r9, r11 and r12 are NOT touched: .Lrx_tail runs afterwards and needs the
+ * rxbuf base, the stuffing state and the emitted count exactly as they are.
+ */
+	.set    BCYC, 16
+.Lti_pid:
+	TIBIT   Q0
+	ldrb    r0, [r1, #TI_GROUPS_OFS]	/* 2/4                       */
+	ldr     r2, [r1, #TI_TAIL_OFS]		/* 2/4  the tail target      */
+	mov     r14, r2				/* 1                         */
+	TBUSE   (1 + 2 * USB_RAM_ACCESS)
+
+	TIBIT   Q1
+	movs    r3, #TI_BITS_OFS		/* 1                         */
+	adds    r1, r1, r3			/* 1  r1 = the wire stream   */
+	ldrb    r2, [r1, #0]			/* 2/4  group 0              */
+	adds    r1, r1, #1			/* 1                         */
+	mov     r8, r2				/* 1  Q7 hands it to r4      */
+	TBUSE   (4 + USB_RAM_ACCESS)
+
+	TIBIT   Q2
+	ldr     r2, =(usb_ti_D0 + 1)		/* 2/4  the loop target      */
+	mov     r3, r14				/* 1                         */
+	eors    r2, r3				/* 1  loop ^ tail            */
+	mov     r10, r2				/* 1  the dispatch constant  */
+	TBUSE   (3 + LIT_CYC)
+
+	TIBIT   Q3
+	TBPADTO 16
+	TIBIT   Q4
+	TBPADTO 16
+	TIBIT   Q5
+	TBPADTO 16
+	TIBIT   Q6
+	TBPADTO 16
+
+	TIBIT   Q7
+	mov     r4, r8				/* 1  group 0 is the queue   */
+	TBUSE   1
+	TBPADTO (16 - LIT_CYC - 3)
+	ldr     r2, =(usb_ti_D0 + 1)		/* 2/4                       */
+	bx      r2				/* 3                         */
+	TBUSE   (LIT_CYC + 3)
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B IN cell Q7 is not 16 cycles"
+	.endif
+
+/* ---- the payload: eight cells a group, five cycles of transmitter -------
+ * There is no pipeline here because there is nothing left to compute: bit
+ * stuffing and the CRC16 are already in the stream, so a cell is the NRZI
+ * toggle and the store, and the remaining eleven cycles carry a one-group
+ * prefetch and, in the last cell, the dispatch.
+ *
+ * The dispatch is branch-free and touches no memory.  m = 0 when this was
+ * the last full group and -1 otherwise, and
+ *     target = tail ^ ((loop ^ tail) & m)
+ * is the loop target when m = -1 and the tail target when m = 0.  A BX is a
+ * flat 3 cycles (ENGINE16_SPEC.md S2), so the cell is exactly 16 whichever
+ * way it goes - which is the property a taken conditional branch here would
+ * destroy. */
+	.set    BCYC, 16
+	TIBIT   D0
+	ldrb    r2, [r1, #0]			/* 2/4  one group ahead      */
+	adds    r1, r1, #1			/* 1                         */
+	mov     r8, r2				/* 1                         */
+	TBUSE   (2 + USB_RAM_ACCESS)
+	TBPADTO 16
+
+	TIBIT   D1
+	TBPADTO 16
+	TIBIT   D2
+	TBPADTO 16
+	TIBIT   D3
+	TBPADTO 16
+	TIBIT   D4
+	TBPADTO 16
+	TIBIT   D5
+	TBPADTO 16
+	TIBIT   D6
+	TBPADTO 16
+
+	TIBIT   D7
+	mov     r4, r8				/* 1  the prefetched group   */
+	subs    r0, r0, #1			/* 1  groups remaining       */
+	rsbs    r2, r0, #0			/* 1  \                      */
+	asrs    r2, r2, #31			/* 1  / m: 0 last, -1 more   */
+	mov     r3, r10				/* 1  loop ^ tail            */
+	ands    r2, r3				/* 1                         */
+	mov     r3, r14				/* 1  tail                   */
+	eors    r2, r3				/* 1                         */
+	bx      r2				/* 3                         */
+	TBUSE   11
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B IN cell D7 is not 16 cycles"
+	.endif
+
+/* The final, partial group: t = (wire bits) & 7 cells, entered at T(8-t) so
+ * the queue's low bits are consumed oldest first exactly as in a full group.
+ * The record carries T(8-t) as its tail target, or .Lti_eop when t = 0. */
+	.set    BCYC, 16
+	TIBIT   T1
+	TBPADTO 16
+	TIBIT   T2
+	TBPADTO 16
+	TIBIT   T3
+	TBPADTO 16
+	TIBIT   T4
+	TBPADTO 16
+	TIBIT   T5
+	TBPADTO 16
+	TIBIT   T6
+	TBPADTO 16
+	TIBIT   T7
+	TBPADTO (16 - LIT_CYC - 3)
+	ldr     r2, =(.Lti_eop + 1)		/* 2/4                       */
+	bx      r2				/* 3                         */
+	TBUSE   (LIT_CYC + 3)
+	.if     BCYC != 16
+	.error  "engine16_merged: Design B IN cell T7 is not 16 cycles"
+	.endif
+
+/* ---- abort: turnaround.md S6.4, and it ends in the C layer -------------
+ * The IN abort differs from the DATA one in where it goes afterwards.  A
+ * DATA whose CRC failed is dropped and the host retries the DATA.  An IN
+ * token that failed the gate did so because this endpoint has nothing
+ * rendered for it - the first IN after a state change, or a token for
+ * another device - and dropping it would leave nothing rendered for the
+ * retry either.  So the abort falls into the ordinary tail, which calls
+ * usb_pid_handle_in, whose usb_send_data is swallowed by the suppression
+ * flag and renders the arm record instead.  One transaction is lost to the
+ * host's timeout; the retry is answered inside 6.5 bit times. */
+.Lti_abort:
+	movs    r1, #40			/* 120..160 cycles = 7.5..10 bit     */
+1:	subs    r1, #1			/* times of an unchanging level: a   */
+	bne     1b			/* stuff violation, and a PID of 0xFF*/
+
+/* ---- EOP: SE0 for two bit times, driven J for one, then release -------- */
+	.global usb_ti_eop
+usb_ti_eop:
+.Lti_eop:
+	nop				/* 1                                 */
+	nop				/* 1                                 */
+	lsrs    r2, r6, #16		/* 1  \ the toggle word's reset half */
+	lsls    r2, r2, #16		/* 1  / = both pins low = SE0        */
+	str     r2, [r7, #USB_BSRR_OFS]	/* 1  =5, on the same cadence        */
+	.rept   11
+	nop
+	.endr				/* =16                               */
+	ldr     r2, =BSRR_J		/* 2                                 */
+	.rept   14
+	nop
+	.endr				/* =16                               */
+	nop
+	nop
+	nop
+	nop
+	str     r2, [r7, #USB_BSRR_OFS]	/* 1  =5  driven J for one bit time  */
+	.rept   11
+	nop
+	.endr				/* =16                               */
+
+	/* Untimed.  Release the pins; the pull-up holds J. */
+	ldr     r1, =MODER_MASK
+	ldr     r2, [r7, #USB_MODER_OFS]
+	bics    r2, r1
+	str     r2, [r7, #USB_MODER_OFS]
+	ldr     r2, =(.Ltb_sent + 1)	/* the shared epilogue: set the       */
+	bx      r2			/* suppression flag, then .Lrx_tail   */
+	.ltorg
+#endif	/* USB_TURNAROUND_B && USB_TURNAROUND_B_IN */
+
 	.size   usb_rx_engine16, . - usb_rx_engine16
 	.ltorg
+
+
+/* ===================== rendering an IN response ==========================
+ * Called by usb_send_data (engine16_tx.S) with its four arguments intact,
+ * from the untimed tail of the transaction BEFORE the one this packet will
+ * answer.  It turns (payload, length, PID) into the wire-bit stream the
+ * payload cells shift out: CRC16 appended, bit stuffing applied, LSB first.
+ * NRZI is NOT applied - that is the cell's own `sbcs/ands/eors`.
+ *
+ * This is not new work.  It is exactly the pipeline engine16_tx.S runs in
+ * the eleven spare cycles of each of its cells; doing it here costs the
+ * same arithmetic and takes it off the wire, which is what lets the payload
+ * cell hold 16 cycles when the transmit engine's own measures 18
+ * (turnaround.md S11.6).  The ISR gets SHORTER, not longer: a transmission
+ * it no longer performs was ~100 cells of 16 cycles.
+ *
+ * Arming is one-shot and explicit.  usb_in_pend is written only by the two
+ * places that know an IN response is what is being produced - the token
+ * dispatch and the refresh hook - and is consumed and cleared here, so no
+ * other caller of usb_send_data can arm anything by accident.
+ *
+ *   usb_in_pend +0  u16 pat    the validated token halfword to install, or
+ *                              zero meaning "keep the one already there"
+ *               +2  u8  valid  one-shot
+ *               +3  u8  endp
+ * ======================================================================== */
+	.global usb_in_render
+	.thumb_func
+	.type   usb_in_render, %function
+usb_in_render:
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+	push    {r0-r7, lr}		/* sp+0 r0, +4 r1, +8 r2, +12 r3     */
+	ldr     r6, =usb_in_pend
+	ldrb    r5, [r6, #2]
+	cmp     r5, #0
+	bne     .Lir_go
+	/* Every bail-out returns HERE rather than at the far end: a Thumb
+	 * conditional branch reaches +-254 bytes and the stuffing loop below
+	 * is longer than that.  One taken branch on the good path, in an
+	 * untimed routine. */
+.Lir_bail:
+	pop     {r0-r7, pc}
+.Lir_go:
+	movs    r5, #0
+	strb    r5, [r6, #2]		/* one-shot, cleared as it fires     */
+
+	cmp     r2, #0			/* poly_function != 0 means no CRC,  */
+	bne     .Lir_bail		/* i.e. a handshake, not a DATA      */
+	cmp     r1, #8			/* the LS maximum, and the bound the */
+	bhi     .Lir_bail		/* record's 24 spare bytes rest on   */
+	cmp     r3, #0xC3		/* DATA0                             */
+	beq     .Lir_pid_ok
+	cmp     r3, #0x4B		/* DATA1, and nothing else           */
+	bne     .Lir_bail
+.Lir_pid_ok:
+	ldrb    r5, [r6, #3]		/* endpoint                          */
+	cmp     r5, #ENDPOINTS
+	bhs     .Lir_bail
+	lsls    r5, r5, #TI_REC_SHIFT
+	ldr     r4, =usb_in_arm
+	adds    r4, r4, r5		/* r4 = the record                   */
+
+	/* The pattern to install.  The record was disarmed by whoever set
+	 * usb_in_pend, so every path that returns without reaching the last
+	 * store below leaves the endpoint UNARMED rather than armed with a
+	 * packet that no longer matches the state - which is what a bail-out
+	 * here means.  A user IN handler that transmits nothing at all takes
+	 * exactly that path. */
+	ldrh    r5, [r6, #0]
+	push    {r4, r5}		/* sp+0 record, +4 pattern; every     */
+					/* saved argument moves up by 8       */
+
+/* ---- payload and CRC16 into the staging buffer ------------------------
+ * One pass, not two: the copy and the CRC16 step share the byte that has
+ * just been loaded.  usb_txbuf is free here - the transmit path refills it
+ * after this returns and the suppressed path never touches it. */
+	ldr     r6, =usb_txbuf
+	ldr     r7, =usb_tables		/* T_CRC16 is at offset 0            */
+	movs    r2, #0
+	mvns    r2, r2
+	lsrs    r2, r2, #16		/* CRC16 init 0xFFFF                 */
+	movs    r5, #0
+.Lir_crc:
+	cmp     r5, r1
+	bhs     .Lir_crce
+	ldrb    r3, [r0, r5]
+	strb    r3, [r6, r5]
+	eors    r3, r2
+	uxtb    r3, r3
+	lsls    r3, r3, #1
+	ldrh    r3, [r7, r3]
+	lsrs    r2, r2, #8
+	eors    r2, r3			/* crc = (crc>>8) ^ T[(crc^b)&0xFF]  */
+	adds    r5, r5, #1
+	b       .Lir_crc
+.Lir_crce:
+	mvns    r2, r2			/* the wire form is the complement,  */
+	strb    r2, [r6, r1]		/* low byte first - TXSEG2/TXSEG3    */
+	lsrs    r3, r2, #8
+	adds    r5, r1, #1
+	strb    r3, [r6, r5]
+	adds    r1, r1, #2		/* source bytes = payload + CRC16    */
+
+/* ---- bit stuffing, LSB first, into the record -------------------------
+ * A nibble at a time, through engine16_tx.S's own T_TX - the table that
+ * engine's TXSEG4/TXSEG5 read once per nibble in the eleven spare cycles of
+ * a bit cell.  Indexed (state+1)*32 + nibble*2, it returns
+ *     entry = m<<9 | (n-4)<<8 | (state'+1)<<5,   m = w + 2^n - 1
+ * where w is the nibble's four data bits with any stuffed 0 inserted,
+ * oldest at bit 0, and n is 4 or 5.  The bias is what lets ONE add append a
+ * variable number of bits and move the accumulator's sentinel by exactly n:
+ * with acc = data + 2^f,  acc + (m<<f) = data + (w<<f) + 2^(f+n).
+ *
+ * A bit-at-a-time loop was written first and measured; this is about five
+ * times cheaper, and the difference lands directly on the ISR that follows
+ * the host's ACK (design_b_in.md S10). */
+	.macro  TISTUFF
+	lsls    r7, r7, #1
+	orrs    r7, r5			/* (state+1)*32 + nibble*2           */
+	ldrh    r1, [r6, r7]
+	uxtb    r5, r1			/* (state'+1)<<5                     */
+	lsrs    r2, r1, #9		/* m                                 */
+	lsls    r2, r2, r4
+	adds    r3, r3, r2		/* append n bits AND move the sentinel*/
+	lsls    r1, r1, #23		/* \                                 */
+	lsrs    r1, r1, #31		/*  | n = 4 + bit 8                  */
+	adds    r1, r1, #4		/* /                                 */
+	adds    r4, r4, r1
+	mov     r2, r10
+	adds    r2, r2, r1
+	mov     r10, r2			/* nbits += n                        */
+	cmp     r4, #8			/* f <= 7 on entry and n <= 5, so at */
+	blo     1f			/* most one byte can come out here   */
+	mov     r2, r9
+	strb    r3, [r2, #0]
+	adds    r2, r2, #1
+	mov     r9, r2
+	lsrs    r3, r3, #8		/* the sentinel comes with it        */
+	subs    r4, r4, #8
+1:
+	.endm
+
+	mov     r8, r6			/* source                            */
+	mov     r11, r1			/* source bytes                      */
+	ldr     r6, [sp, #0]		/* the record                        */
+	adds    r6, r6, #TI_BITS_OFS
+	mov     r9, r6			/* output byte pointer               */
+	movs    r6, #0
+	mov     r10, r6			/* nbits                             */
+	/* The run of consecutive 1s SYNC and the PID leave behind.  SYNC is
+	 * 00000001 and contributes one; DATA0 = 0xC3 is 1,1,0,0,0,0,1,1 LSB
+	 * first and ends on two; DATA1 = 0x4B is 1,1,0,1,0,0,1,0 and ends on
+	 * none.  Neither field can stuff on its own - a legal PID's longest
+	 * run is four and SYNC adds one, against a rule that inserts after
+	 * six - so the payload is the first place a 0 can be needed. */
+	ldr     r3, [sp, #20]		/* the PID argument, as pushed       */
+	movs    r5, #(1 << 5)		/* state 0, biased: DATA1            */
+	cmp     r3, #0xC3
+	bne     .Lir_run
+	movs    r5, #(3 << 5)		/* state 2, biased: DATA0            */
+.Lir_run:
+	ldr     r6, =usb_tx_tables	/* T_TX's base                       */
+	movs    r3, #1			/* accumulator: the sentinel at bit 0*/
+	movs    r4, #0			/* f, the bits under it              */
+	movs    r0, #0			/* source byte index                 */
+.Lir_byte:
+	mov     r2, r11
+	cmp     r0, r2
+	bhs     .Lir_tail
+	mov     r2, r8
+	ldrb    r2, [r2, r0]
+	mov     r12, r2
+	movs    r7, #0x0F
+	ands    r7, r2			/* low nibble = first in time        */
+	TISTUFF
+	mov     r7, r12
+	lsrs    r7, r7, #4		/* high nibble                       */
+	TISTUFF
+	adds    r0, r0, #1
+	b       .Lir_byte
+
+.Lir_tail:
+	/* USB 2.0 S7.1.9: "a zero bit will be inserted even if it is the last
+	 * bit before the end-of-packet signal".  T_TX DEFERS a stuffed zero
+	 * to the head of the next nibble - that is what state 6 means, and it
+	 * is why the table has a seventh row - so at the end of the stream
+	 * there is no next nibble to carry it and it has to be emitted here.
+	 * Measured on 20000 random packets, 0.69% of them end this way: about
+	 * one packet in 150, not an edge nobody meets.  design_b_in.md S11
+	 * records what that means for engine16_tx.S, which has no equivalent. */
+	cmp     r5, #(7 << 5)		/* state 6: six consecutive 1s       */
+	bne     .Lir_flush
+	movs    r2, #1
+	lsls    r2, r2, r4
+	adds    r3, r3, r2		/* a 0 bit: only the sentinel moves  */
+	adds    r4, r4, #1
+	mov     r2, r10
+	adds    r2, r2, #1
+	mov     r10, r2
+	cmp     r4, #8
+	blo     .Lir_flush
+	mov     r2, r9
+	strb    r3, [r2, #0]
+	adds    r2, r2, #1
+	mov     r9, r2
+	lsrs    r3, r3, #8
+	subs    r4, r4, #8
+
+.Lir_flush:
+	cmp     r4, #0			/* the final, partial group.  Its    */
+	beq     .Lir_fin		/* high bits carry the sentinel and  */
+	mov     r7, r9			/* whatever is above it, and are     */
+	strb    r3, [r7, #0]		/* never shifted out: the tail chain */
+					/* is entered at T(8-t), t cells.    */
+.Lir_fin:
+	pop     {r4, r5}		/* record, pattern                   */
+	mov     r7, r10			/* nbits                             */
+	lsrs    r3, r7, #3
+	strb    r3, [r4, #TI_GROUPS_OFS]
+	movs    r3, #7
+	ands    r7, r3			/* t = nbits & 7                     */
+	lsls    r7, r7, #2
+	ldr     r3, =usb_ti_tails
+	ldr     r3, [r3, r7]
+	str     r3, [r4, #TI_TAIL_OFS]
+	ldr     r3, [sp, #12]		/* the PID argument                  */
+	strb    r3, [r4, #TI_PID_OFS]
+	strh    r5, [r4, #TI_PAT_OFS]	/* ARMED - and this is the LAST store*/
+.Lir_out:
+	pop     {r0-r7, pc}
+
+/* Where the payload chain goes when the whole groups are done: T(8-t) for a
+ * final partial group of t bits, and straight to the EOP when t = 0. */
+	.balign 4
+usb_ti_tails:
+	.word   usb_ti_eop + 1
+	.word   usb_ti_T7 + 1
+	.word   usb_ti_T6 + 1
+	.word   usb_ti_T5 + 1
+	.word   usb_ti_T4 + 1
+	.word   usb_ti_T3 + 1
+	.word   usb_ti_T2 + 1
+	.word   usb_ti_T1 + 1
+	.ltorg
+#else
+	bx      lr			/* B_IN off: nothing to render, and  */
+					/* engine16_tx.S still calls this    */
+#endif
+	.size   usb_in_render, . - usb_in_render
 
 /* ============================== tables ===================================
  * The tables are NOT here.  Both engines need a CRC16 byte table and it is
@@ -1887,6 +2791,40 @@ usb_rxbuf:
  * transmitting.  This is what lets the C layer keep calling
  * usb_send_data(0,0,2,0xD2) from just_ack with its source unchanged
  * (turnaround.md S4.2).  One byte, written only outside every timed path. */
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+/* The one-shot handshake between "an IN response is being produced" and
+ * usb_send_data, which is the only place that sees the payload.  Written by
+ * .Lt_in and by the refresh hook, consumed and cleared by usb_in_render. */
+	.section .bss.usb_in_pend, "aw", %nobits
+	.balign 4
+	.global usb_in_pend
+usb_in_pend:
+	.space  4
+
+/* One pre-rendered IN response per endpoint.  Written only by
+ * usb_send_data (engine16_tx.S), i.e. from the untimed tail of a previous
+ * transaction; read only by the gate and the payload chain above.  A record
+ * whose pattern is zero is not armed, and zero is not a legal token
+ * halfword (design_b_in.md S6), so .bss zero-init disarms everything at
+ * reset without a line of startup code.
+ * TI_REC_SIZE is a power of two because the endpoint indexes it with a
+ * shift - there is no room in cell C6 for a multiply. */
+	.section .bss.usb_in_arm, "aw", %nobits
+	.balign 4
+	.global usb_in_arm
+usb_in_arm:
+	.space  TI_REC_SIZE * ENDPOINTS
+	/* The longest stream this can be asked to hold: 8 payload + 2 CRC16
+	 * bytes = 80 data bits, plus at most one stuffed zero per six 1s = 13,
+	 * = 93 wire bits = 12 bytes, plus one because the payload chain
+	 * prefetches a group ahead and the last prefetch reads past the end.
+	 * tools/design_b_in_model.py measures the real worst case at 92 bits
+	 * over 7322 packets; this is the bound, not the measurement. */
+	.if     (TI_BITS_OFS + TI_BITS_BYTES) > TI_REC_SIZE
+	.error  "engine16_merged: the IN arm record cannot hold its stream"
+	.endif
+#endif
+
 	.section .bss.usb_tx_suppress, "aw", %nobits
 	.balign 4
 	.global usb_tx_suppress

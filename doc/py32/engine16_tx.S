@@ -356,6 +356,16 @@ usb_send_data:
 	 * on its own must set RV003USB_USER_DATA_HANDLES_TOKEN, which
 	 * disables Design B outright - the same condition turnaround.md S4.2
 	 * states. */
+	/* Design B's IN direction (design_b_in.md): if an IN response is what
+	 * is being produced, render it to wire bits into the endpoint's arm
+	 * record before anything else happens to the arguments.  The call is
+	 * unconditional and the decision is inside usb_in_render, which is a
+	 * `bx lr` when USB_TURNAROUND_B_IN is off, so this file needs to know
+	 * nothing about the receive engine's configuration.  It is placed
+	 * ahead of the suppression test on purpose: the refresh path suppresses
+	 * the transmission and the rendering is the whole point of the call. */
+	bl      usb_in_render
+
 	ldr     r4, =usb_tx_suppress
 	ldrb    r5, [r4, #0]
 	cmp     r5, #0
