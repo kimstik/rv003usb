@@ -42,11 +42,24 @@
  *     - engine16_tx.md S8 says why, with numbers - but the observation is
  *     what makes this bit cell five cycles instead of nine.
  *
- * Placement: RAM-resident (.datacode), the section this project already
- * copies to SRAM.  ENGINE16_SPEC.md S2 RAM column: ordinary instruction 1,
- * GPIO store 1 (IOPORT), RAM load/store 2, BX 3, B 2-3, taken conditional
- * 2-3.  Load-bearing: from flash-resident code the two table lookups and the
- * two strb would cost 4 each and the pipeline would not fit in 8 x 11.
+ * Placement: USB_ENGINE16_FLASH, exactly as in engine16_merged.S, and the
+ * two files MUST be built with the same value - the table block below is
+ * read by both engines and a table in the other memory costs 4 per lookup,
+ * which neither engine's cells can absorb.  ENGINE16_SPEC.md S2 RAM column:
+ * ordinary instruction 1, GPIO store 1 (IOPORT), RAM load/store 2, BX 3,
+ * B 2-3, taken conditional 2-3.
+ *
+ * MEASURED, and not previously recorded (FLASH_TIMING.md left this audit
+ * outstanding): THIS ENGINE DOES NOT HOLD 16 CYCLES FROM FLASH.  TXSEG0's
+ * `ldrb r0,[r3,#0]` and TXSEG2/TXSEG3's `strb` go to usb_txbuf, which is
+ * RAM, and cost 4 there instead of 2; cells S0..S5 and S7 measure 18.  The
+ * receive engine has one such access and FLASH_TIMING.md's redistribution
+ * absorbs it; this one has three and there is no slack to absorb them -
+ * tools/engine16_cyc.py --exec flash --ioport r7 --flashdata r14 --budget 16
+ * shows each of them.  The default is still flash, because that is the
+ * configuration the stack is built in and because the RX table has to be
+ * where the RX code is; what this engine needs is its own redistribution,
+ * and it has not been done.
  *
  * Post-review change (ENGINE16_REVIEW.md, the size item): this file holds the
  * one table block BOTH engines index, because the same 512-byte T_CRC16 was
@@ -96,6 +109,19 @@
  * setup, so no load or store in the timed chain can leave the buffer. */
 #define TXBUF_LEN       16
 #define TX_MAXPAY       8
+
+/* Code placement.  See the note in the header, and keep it identical to
+ * engine16_merged.S's USB_ENGINE16_FLASH: the table block at the end of this
+ * file is shared, so both engines are in the same memory or one of them
+ * reads its tables at 4 cycles a lookup. */
+#ifndef USB_ENGINE16_FLASH
+#define USB_ENGINE16_FLASH      1
+#endif
+#if USB_ENGINE16_FLASH
+#define USB_ENGINE16_SECTION    .section .text.engine16, "ax", %progbits
+#else
+#define USB_ENGINE16_SECTION    .section .datacode, "ax", %progbits
+#endif
 
 /* Table layout, one base register (r14).  Row 0 of the halfword table is
  * reused as the dispatch table, because the stuff state is stored as
@@ -278,7 +304,8 @@ usb_tx_\name:
 	.endm
 
 /* ========================================================================= */
-	.section .datacode, "ax", %progbits	/* RAM-resident: see the header */
+	USB_ENGINE16_SECTION		/* .text.engine16, or .datacode:     */
+					/* see the placement note above      */
 	.balign 4
 
 /* ================= entry: usb_send_data / usb_send_empty =================
@@ -496,16 +523,27 @@ usb_tx_eop:
  * One block, two bases.  engine16_merged.S has no tables of its own: the
  * CRC16 byte table is the same 512 bytes in both directions, and the only
  * way to share one copy is to lay both engines' tables out together, because
- * every timed lookup is `ldrh rd,[base,rn]` with the base pinned (RX SEG1
- * reads T_UT at r4+0, TXSEG4 reads T_TX at r14+row, and neither engine has a
- * register free for a second base).  So:
+ * every timed lookup is `ldr(h) rd,[base,rn]` with the base pinned (RX SEG4
+ * reads T_CRC16 at r4+0, TXSEG4 reads T_TX at r14+row, and neither engine
+ * has a register free for a second base).  So:
  *
- *   usb_tables    + 0     T_UT       256 B  RX  (r4 + T_UT    = 0)
- *   usb_tx_tables         = usb_tables + 256
  *   usb_tx_tables + 0     dispatch    32 B  TX  (r14 + T_DISPATCH)
  *   usb_tx_tables + 32    T_TX       224 B  TX  (r14 + T_TX)
- *   usb_tx_tables + 256   T_CRC16    512 B  BOTH: r14 + 256, and r4 + 512
+ *   usb_tables            = usb_tx_tables + 256
+ *   usb_tables    + 0     T_CRC16    512 B  BOTH: r4 + 0, and r14 + 256
+ *   usb_tables    + 512   T_UT       512 B  RX  (r4 + T_UT   = 512)
  *   usb_tables    + 1024  T_CRC5      32 B  RX  (r4 + T_CRC5)
+ *
+ * CRC_ROUND2.md's #1 ("move T_CRC16 to offset 0") is what put T_CRC16 at the
+ * RX base and T_UT above it.  T_UT could not simply swap places with it: its
+ * index is  state*32 + nibble*2  ORed together from r11 and the nibble, with
+ * no room for a non-zero table offset and no register to hold one, so at any
+ * base but 0 it costs a cycle in SEG0, SEG1 and SEG2 - more than SEG4 saves.
+ * The way out is to make T_UT's entries WORDS: the index becomes
+ * state*64 + nibble*4, the biased base 512 rides in the entry's own low
+ * halfword (uxth, one cycle, exactly where uxtb was), and m and n move to
+ * bits 27..31 and 24..26 where a single shift still extracts each.  Every
+ * receive segment keeps its cycle count; the table costs 256 bytes more.
  *
  * The offsets both engines assume are asserted at the end of the block, so a
  * table that grows or moves is a build failure, not a wrong packet.
@@ -517,43 +555,12 @@ usb_tx_eop:
  * both CRC residues confirmed numerically).  Each table carries the
  * generator that produces it.
  *
- * They live in the same RAM-resident section as the code, so a lookup is a
- * 2-cycle RAM load; from flash it would be 4 and the pipeline would not fit.
+ * They live in the same section as both engines' code, so a lookup costs 2
+ * whichever memory that section lands in.  It is the SAME memory for both
+ * engines by construction - one block, one section - which is what makes the
+ * sharing possible and what forces the two engines to the same residency.
  */
 	.balign 4
-	.global usb_tables
-usb_tables:
-.Ltab_rx:				/* the assertions below need locals: */
-					/* gas will not fold a difference of */
-					/* .global symbols                   */
-	/* T_UT: 8 unstuff states x 16 wire nibbles.
-	 * halfword = m<<11 | n<<8 | newstate<<5, m = kept_bits + 2^n - 1.
-	 * Row 7 is the sticky stuffing-violation row.  It differs from VUSB's:
-	 * it KEEPS its four bits (n=4) instead of emitting nothing, so that the
-	 * emitted-byte counter keeps advancing and SEG5's bound terminates the
-	 * chain.  With VUSB's n=0 row the counter freezes and a bus stuck in a
-	 * violation spins the ISR forever - see the .md, "the hang". */
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0xb400, 0xf480
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0xb400, 0xf4a0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0xb400, 0xf4c0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x9400, 0xd420, 0x7300, 0x00e0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x8400, 0xc420, 0xa400, 0xe440, 0x5300, 0x7320, 0x00e0, 0x00e0
-	.hword	0x7c00, 0xbc20, 0x9c00, 0xdc40, 0x8c00, 0xcc20, 0xac00, 0xec60
-	.hword	0x4300, 0x6320, 0x5300, 0x7340, 0x00e0, 0x00e0, 0x00e0, 0x00e0
-	.hword	0x3b00, 0x5b20, 0x4b00, 0x6b40, 0x4300, 0x6320, 0x5300, 0x7360
-	.hword	0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0, 0x00e0
-	.hword	0x7ce0, 0xbce0, 0x9ce0, 0xdce0, 0x8ce0, 0xcce0, 0xace0, 0xece0
-	.hword	0x84e0, 0xc4e0, 0xa4e0, 0xe4e0, 0x94e0, 0xd4e0, 0xb4e0, 0xf4e0
-
-	/* No .balign here: T_UT is 256 bytes from a 4-aligned start, so the
-	 * dispatch words are word-aligned, and the assertions at the end of
-	 * the block prove it.  An alignment directive inside the block would
-	 * be a variable-size frag and gas would refuse to fold them. */
 	.global usb_tx_tables
 usb_tx_tables:
 .Ltab_tx:
@@ -594,10 +601,15 @@ usb_tx_tables:
 	.hword	0x3f20, 0x4320, 0x4720, 0x4b20, 0x4f20, 0x5320, 0x5720, 0x5b20
 	.hword	0x5f40, 0x6340, 0x6740, 0x6b40, 0x6f60, 0x7360, 0x7780, 0x7ba0
 
+	.global usb_tables
+usb_tables:
+.Ltab_rx:				/* the assertions below need locals: */
+					/* gas will not fold a difference of */
+					/* .global symbols                   */
 .Ltab_crc16:
 	/* T_CRC16: crc = (crc>>8) ^ T[(crc^byte)&0xFF], reflected 0xA001.
 	 * Read by BOTH engines - TXSEG1 at r14+256, engine16_merged.S SEG4
-	 * at r4+512 - and there is one copy.  With reduce_bits(c,k,poly)
+	 * at r4+0 - and there is one copy.  With reduce_bits(c,k,poly)
 	 * reducing c by k bits (engine16_tx.md S9, engine16_merged.md S9):
 	 *   T_CRC16 = [reduce_bits(i, 8, 0xA001) for i in range(256)]
 	 * The residue over message+CRC16 is 0xB001, which is what the receive
@@ -635,6 +647,38 @@ usb_tx_tables:
 	.hword	0x4400, 0x84c1, 0x8581, 0x4540, 0x8701, 0x47c0, 0x4680, 0x8641
 	.hword	0x8201, 0x42c0, 0x4380, 0x8341, 0x4100, 0x81c1, 0x8081, 0x4040
 
+.Ltab_ut:
+	/* T_UT: 8 unstuff states x 16 wire nibbles, WORDS (see the layout note
+	 * at the head of this block for why they are not halfwords).
+	 *   word = m<<27 | n<<24 | (T_UT | newstate<<6),  m = kept_bits + 2^n-1
+	 * The low halfword is the NEXT lookup's index base, already carrying
+	 * T_UT, so SEG0/SEG2 park it with one `uxth` and SEG0/SEG1 OR the
+	 * nibble*4 straight into it: 512 is bit 9, state*64 is bits 6..8 and
+	 * nibble*4 is bits 2..5, so the OR is an add that cannot carry.
+	 * Derived from the halfword table this replaces, entry for entry:
+	 *   word = (h>>11)<<27 | ((h>>8)&7)<<24 | 512 | ((h>>5)&7)<<6
+	 * Row 7 is the sticky stuffing-violation row.  It differs from VUSB's:
+	 * it KEEPS its four bits (n=4) instead of emitting nothing, so that the
+	 * emitted-byte counter keeps advancing and SEG5's bound terminates the
+	 * chain.  With VUSB's n=0 row the counter freezes and a bus stuck in a
+	 * violation spins the ISR forever - see the .md, "the hang". */
+	.word	0x7c000200, 0xbc000240, 0x9c000200, 0xdc000280, 0x8c000200, 0xcc000240, 0xac000200, 0xec0002c0
+	.word	0x84000200, 0xc4000240, 0xa4000200, 0xe4000280, 0x94000200, 0xd4000240, 0xb4000200, 0xf4000300
+	.word	0x7c000200, 0xbc000240, 0x9c000200, 0xdc000280, 0x8c000200, 0xcc000240, 0xac000200, 0xec0002c0
+	.word	0x84000200, 0xc4000240, 0xa4000200, 0xe4000280, 0x94000200, 0xd4000240, 0xb4000200, 0xf4000340
+	.word	0x7c000200, 0xbc000240, 0x9c000200, 0xdc000280, 0x8c000200, 0xcc000240, 0xac000200, 0xec0002c0
+	.word	0x84000200, 0xc4000240, 0xa4000200, 0xe4000280, 0x94000200, 0xd4000240, 0xb4000200, 0xf4000380
+	.word	0x7c000200, 0xbc000240, 0x9c000200, 0xdc000280, 0x8c000200, 0xcc000240, 0xac000200, 0xec0002c0
+	.word	0x84000200, 0xc4000240, 0xa4000200, 0xe4000280, 0x94000200, 0xd4000240, 0x73000200, 0x000003c0
+	.word	0x7c000200, 0xbc000240, 0x9c000200, 0xdc000280, 0x8c000200, 0xcc000240, 0xac000200, 0xec0002c0
+	.word	0x84000200, 0xc4000240, 0xa4000200, 0xe4000280, 0x53000200, 0x73000240, 0x000003c0, 0x000003c0
+	.word	0x7c000200, 0xbc000240, 0x9c000200, 0xdc000280, 0x8c000200, 0xcc000240, 0xac000200, 0xec0002c0
+	.word	0x43000200, 0x63000240, 0x53000200, 0x73000280, 0x000003c0, 0x000003c0, 0x000003c0, 0x000003c0
+	.word	0x3b000200, 0x5b000240, 0x4b000200, 0x6b000280, 0x43000200, 0x63000240, 0x53000200, 0x730002c0
+	.word	0x000003c0, 0x000003c0, 0x000003c0, 0x000003c0, 0x000003c0, 0x000003c0, 0x000003c0, 0x000003c0
+	.word	0x7c0003c0, 0xbc0003c0, 0x9c0003c0, 0xdc0003c0, 0x8c0003c0, 0xcc0003c0, 0xac0003c0, 0xec0003c0
+	.word	0x840003c0, 0xc40003c0, 0xa40003c0, 0xe40003c0, 0x940003c0, 0xd40003c0, 0xb40003c0, 0xf40003c0
+
 .Ltab_crc5:
 	/* T_CRC5: crc = (crc>>4) ^ T[(crc^nibble)&0xF], reflected 0x14.  Same
 	 * reduce_bits as above, four bits at a time:
@@ -644,20 +688,26 @@ usb_tx_tables:
 	.hword	0x0014, 0x0002, 0x0011, 0x0007, 0x001e, 0x0008, 0x001b, 0x000d
 
 .Ltab_end:
-	.if     (.Ltab_tx - .Ltab_rx) != 256
-	.error  "engine16 tables: usb_tx_tables is not usb_tables + 256"
+	.if     (.Ltab_rx - .Ltab_tx) != 256
+	.error  "engine16 tables: usb_tables is not usb_tx_tables + 256"
 	.endif
 	.if     (.Ltab_crc16 - .Ltab_tx) != 256
 	.error  "engine16 tables: T_CRC16 is not at the TX base + 256"
 	.endif
-	.if     (.Ltab_crc16 - .Ltab_rx) != 512
-	.error  "engine16 tables: T_CRC16 is not at the RX base + 512"
+	.if     (.Ltab_crc16 - .Ltab_rx) != 0
+	.error  "engine16 tables: T_CRC16 is not at the RX base + 0"
+	.endif
+	.if     (.Ltab_ut - .Ltab_rx) != 512
+	.error  "engine16 tables: T_UT is not at the RX base + 512"
 	.endif
 	.if     (.Ltab_crc5 - .Ltab_rx) != 1024
 	.error  "engine16 tables: T_CRC5 is not at the RX base + 1024"
 	.endif
 	.if     (.Ltab_end - .Ltab_rx) != 1056
-	.error  "engine16 tables: the block is not 1056 bytes"
+	.error  "engine16 tables: the RX half of the block is not 1056 bytes"
+	.endif
+	.if     (.Ltab_end - .Ltab_tx) != 1312
+	.error  "engine16 tables: the block is not 1312 bytes"
 	.endif
 
 	.section .bss.usb_txbuf, "aw", %nobits

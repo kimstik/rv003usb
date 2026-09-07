@@ -36,12 +36,24 @@
  *               object can address rxbuf out of range (DEFECTS_VERIFIED D-2)
  *               and it costs 2 cycles inside a cell that had slack.
  *
- * Placement: RAM-resident (.datacode, copied at boot like the rest of this
- * project's hot code).  ENGINE16_SPEC.md S2 RAM column: ordinary insn 1,
- * GPIO load 1 (IOPORT), RAM load/store 2, taken conditional 2-3, B 2-3,
- * BX 3.  The tables are in the same section, so a table lookup is a 2-cycle
- * RAM load.  This is load-bearing: from flash-resident code the rxbuf store
- * and both table lookups would cost 4 each and the pipeline would not fit.
+ * Placement: selected by USB_ENGINE16_FLASH, and the two configurations are
+ * NOT the same object.  ENGINE16_SPEC.md S2 / FLASH_TIMING.md: an access is
+ * priced by the memory it touches, not by the addressing mode -
+ *
+ *   code in flash:  port 1, flash (the tables) 2, RAM (rxbuf) 4
+ *   code in RAM:    port 1, RAM (the tables) 2, flash 4
+ *
+ * so the tables must live in the SAME memory as the code - they do, both
+ * engines' block is in engine16_tx.S in this same section - and the only
+ * access whose cost differs between the two is the one RAM access in the
+ * timed path: SEG3's `strb` into rxbuf, 2 from RAM and 4 from flash.  That
+ * is the whole of the difference, it is declared in SEG3_CYC, and CELL pads
+ * each configuration to exactly 16 on its own cost model.
+ *
+ * Flash-resident is the default because it is the configuration the stack
+ * is built in (INTEGRATION_BUILD.md: 336 B of RAM against 3600 B) and the
+ * one FLASH_TIMING.md says is worth finishing.  Cell 3 measured 18 there
+ * until SEG3's commit-mask tail moved into SEG4; see SEG3.
  *
  * Post-review repairs (ENGINE16_REVIEW.md F-1..F-5).  All of them are in the
  * entry, the dispatch or the ISR tail; no bit cell changed, in either cost
@@ -236,17 +248,47 @@
 #error "engine16_merged: USB_RX_CHECK must be 0, 1 or 2"
 #endif
 
+/* ------------------------------------------------------- code placement
+ * 1: the engine and the shared table block are in .text.engine16, i.e. in
+ *    flash, and rxbuf - the only RAM the timed path touches - costs 4.
+ * 0: .datacode, copied to RAM at boot, and rxbuf costs 2.
+ * engine16_tx.S carries the same switch and must be built with the same
+ * value: the tables are in that file and a table read from the wrong memory
+ * costs 4 in SEG0, SEG1 and SEG2, which no cell can absorb. */
+#ifndef USB_ENGINE16_FLASH
+#define USB_ENGINE16_FLASH      1
+#endif
+#if USB_ENGINE16_FLASH
+#define USB_RAM_ACCESS          4
+#define USB_ENGINE16_SECTION    .section .text.engine16, "ax", %progbits
+#else
+#define USB_RAM_ACCESS          2
+#define USB_ENGINE16_SECTION    .section .datacode, "ax", %progbits
+#endif
+
 /* Table offsets inside the single base held in r4.  The block itself is in
  * engine16_tx.S - see the note where the tables used to be - and asserts
- * these three offsets there.  T_CRC16 must stay <= 512 for SEG4's index
- * arithmetic and T_CRC5 a whole multiple of 256 for .Lcrc5_byte's. */
-#define T_UT            0		/* 128 halfwords: unstuff + accumulate */
-#define T_CRC16         512		/* 256 halfwords: SHARED with the TX   */
+ * these offsets there.
+ *
+ * T_CRC16 is at 0 and NOTHING ELSE MAY GO THERE (CRC_ROUND2.md S6 #1).  At
+ * offset 0 SEG4's index is the bare `lsls r2,r2,#1`; at 512 it needed
+ * `adds #T_CRC16/2-1 / lsls #1 / adds #2`, two cycles more, and those two
+ * cycles are paid again in the flush for each of the two wire bytes the
+ * turnaround waits on.  T_UT moved above it and pays nothing for the move
+ * because its entries became words: its index is state*64 + nibble*4 ORed
+ * into the entry's own low halfword, which already carries T_UT itself, so
+ * the base is free exactly as it was at 0.  T_CRC5 must stay a whole
+ * multiple of 256 for .Lcrc5_byte's index. */
+#define T_UT            512		/* 128 words: unstuff + accumulate     */
+#define T_CRC16         0		/* 256 halfwords: SHARED with the TX   */
 					/* engine, which sees the same table   */
 					/* at its own base + 256               */
 #define T_CRC5          1024		/*  16 halfwords: CRC5 nibble step     */
-	.if     (T_CRC16 / 2 - 1) > 255 || (T_CRC16 & 1)
-	.error  "engine16_merged: T_CRC16 does not fit SEG4's index arithmetic"
+	.if     T_CRC16 != 0
+	.error  "engine16_merged: SEG4's index arithmetic needs T_CRC16 at 0"
+	.endif
+	.if     (T_UT & 511) != 0 || (T_UT >> 16) != 0
+	.error  "engine16_merged: T_UT must be a multiple of 512 (SEG0's OR)"
 	.endif
 	.if     ((T_CRC5 >> 8) << 8) != T_CRC5 || (T_CRC5 >> 8) > 255
 	.error  "engine16_merged: T_CRC5 does not fit .Lcrc5_byte's index"
@@ -293,13 +335,16 @@ usb_rx_cell\idx:
  *   r2  temp.  MUST be dead at every segment boundary: CELL clobbers it.
  *   r3  accumulator: bits 0..r0-1 are data (oldest at bit 0), bit r0 = 1
  *   r4  table base    r5 wire packer    r6 pin mask    r7 GPIO base
- *   r8  park: low-nibble index, then the CRC16 table value
- *   r9  rxbuf base (32-byte aligned)    r11 unstuff state<<5
+ *   r8  park: low-nibble index (nibble*4), then the CRC16 table   
+ *       value
+ *   r9  rxbuf base (32-byte aligned)    r11 T_UT | unstuff state<<6
  *   r10 CRC16, or the parity accumulator, or unused - see USB_RX_CHECK
  *   r12 emitted byte count              r14 chain head (bit0 set, for bx)
  *
- * The table (T_UT) is indexed by  state*32 + nibble*2  and returns
- *     entry = m<<11 | n<<8 | newstate<<5,   m = kept_bits + 2^n - 1
+ * The table (T_UT) is indexed by  T_UT + state*64 + nibble*4  and returns
+ *     entry = m<<27 | n<<24 | (T_UT | newstate<<6),  m = kept_bits + 2^n - 1
+ * The low halfword is the NEXT lookup's index base, T_UT included, so the
+ * table's own offset costs nothing to carry and T_CRC16 keeps offset 0.
  * n is how many of the nibble's four bits survive unstuffing, kept_bits are
  * those bits with the oldest at bit 0, and the +2^n-1 bias is what makes
  *     acc + (m << r0)
@@ -310,66 +355,86 @@ usb_rx_cell\idx:
  * ==================================================================== */
 
 	.macro  SEG0			/* 7: high nibble -> table, state     */
-	lsls    r1, r1, #1		/* 1  nibble*2                        */
-	mov     r2, r11			/* 1  state, pre-shifted <<5          */
+	lsls    r1, r1, #2		/* 1  nibble*4                        */
+	mov     r2, r11			/* 1  T_UT | state<<6, from the entry */
 	orrs    r1, r2			/* 1  index                           */
-	ldrh    r1, [r4, r1]		/* 2  ONE access = NRZI+stuff+assembly*/
-	uxtb    r2, r1			/* 1  entry&0xFF = newstate<<5        */
+	ldr     r1, [r4, r1]		/* 2  ONE access = NRZI+stuff+assembly*/
+	uxth    r2, r1			/* 1  entry&0xFFFF = T_UT|newstate<<6 */
 	mov     r11, r2			/* 1                                  */
 	.endm
 
 	.macro  SEG1			/* 11: append it, then low nibble     */
-	lsls    r2, r1, #21		/* 1  \  n = (entry>>8)&7             */
+	lsls    r2, r1, #5		/* 1  \  n = (entry>>24)&7            */
 	lsrs    r2, r2, #29		/* 1  /                               */
-	lsrs    r1, r1, #11		/* 1  m                               */
+	lsrs    r1, r1, #27		/* 1  m                               */
 	lsls    r1, r1, r0		/* 1  align to the sentinel           */
 	adds    r3, r3, r1		/* 1  insert n bits, move sentinel    */
 	adds    r0, r0, r2		/* 1  bit count += n                  */
-	mov     r1, r8			/* 1  low nibble*2                    */
+	mov     r1, r8			/* 1  low nibble*4                    */
 	mov     r2, r11			/* 1                                  */
 	orrs    r1, r2			/* 1                                  */
-	ldrh    r1, [r4, r1]		/* 2                                  */
+	ldr     r1, [r4, r1]		/* 2                                  */
 	.endm
 
 	.macro  SEG2			/* 9: append it; fetch the rxbuf base */
-	uxtb    r2, r1			/* 1                                  */
+	uxth    r2, r1			/* 1                                  */
 	mov     r11, r2			/* 1                                  */
-	lsls    r2, r1, #21		/* 1                                  */
+	lsls    r2, r1, #5		/* 1                                  */
 	lsrs    r2, r2, #29		/* 1                                  */
-	lsrs    r1, r1, #11		/* 1                                  */
+	lsrs    r1, r1, #27		/* 1                                  */
 	lsls    r1, r1, r0		/* 1                                  */
 	adds    r3, r3, r1		/* 1                                  */
 	adds    r0, r0, r2		/* 1                                  */
 	mov     r1, r9			/* 1  buffer base, 32-byte aligned    */
 	.endm
 
-	.macro  SEG3			/* 11: bounded store, commit decision */
+/* SEG3 is the cell FLASH_TIMING.md measured at 18: its `strb` into rxbuf is
+ * the one RAM access in the timed path and costs 4 from flash-resident code.
+ * The three cycles it is over by leave here rather than the index
+ * computation FLASH_TIMING.md proposed moving.  Moving the index needs a
+ * register to carry it across the cell boundary and there is none free
+ * between cells 2 and 3 (r8 still holds SEGA's low-nibble park until SEG1
+ * reads it, and computing the address in SEG2 instead costs SEG2 five
+ * cycles against its two of slack).  The commit-mask tail needs no carrier:
+ * r1 already survives the boundary - CELL clobbers only r2 - and nothing
+ * between the two uses r0 or r2.  So `movs/bics/adds` moved to the head of
+ * SEG4, which change 1 left with the room.  The flush emits SEG3 then SEG4
+ * back to back, so the untimed copy is unchanged instruction for
+ * instruction. */
+#define SEG3_CYC        (6 + USB_RAM_ACCESS)
+	.macro  SEG3			/* 9/11: bounded store, commit mask   */
 	mov     r2, r12			/* 1  emitted byte count              */
 	lsls    r2, r2, #USB_RXBUF_MASK	/* 1  \ BALANCE: index &= 31, so no   */
 	lsrs    r2, r2, #USB_RXBUF_MASK	/* 1  / store can leave the buffer    */
-	strb    r3, [r1, r2]		/* 2  speculative store of the byte   */
+	strb    r3, [r1, r2]		/* 2/4  speculative store of the byte */
 	subs    r0, r0, #8		/* 1  negative <=> byte not finished  */
 	asrs    r1, r0, #31		/* 1  -1 if NOT finished              */
 	mvns    r1, r1			/* 1  commit mask: -1 finished, 0 not */
+	.endm
+
+/* The three cycles SEG3 handed over.  They run at the head of every SEG4,
+ * at every USB_RX_CHECK setting, because they are not part of the check:
+ * they restore r0 (the bit count) after SEG3's speculative `subs #8`. */
+	.macro  SEG3_TAIL		/* 3: restore the bit count           */
 	movs    r2, #8			/* 1                                  */
 	bics    r2, r1			/* 1  8 if not finished, else 0       */
 	adds    r0, r0, r2		/* 1  bit count restored, or -8       */
 	.endm
 
 #if USB_RX_CHECK == USB_RX_CHECK_CRC16
-#define SEG4_CYC 9
-	.macro  SEG4			/* 9: CRC16 byte step, speculative    */
+#define SEG4_CYC 10
+	.macro  SEG4			/* 10: 3 of SEG3, then the CRC16 step */
+	SEG3_TAIL			/* 3                                  */
 	mov     r2, r10			/* 1  running CRC                     */
 	eors    r2, r3			/* 1  crc ^ candidate byte            */
 	uxtb    r2, r2			/* 1                                  */
-	adds    r2, #(T_CRC16 / 2 - 1)	/* 1  \ index*2 + T_CRC16, in three  */
-	lsls    r2, r2, #1		/* 1   | instructions for any even     */
-	adds    r2, #2			/* 1  /  T_CRC16 <= 512 (imm8 is 255) */
+	lsls    r2, r2, #1		/* 1  index*2: T_CRC16 is 0, so that  */
+					/*    is the whole address arithmetic */
 	ldrh    r2, [r4, r2]		/* 2                                  */
 	mov     r8, r2			/* 1  park; the commit is decided late*/
 	.endm
 #elif USB_RX_CHECK == USB_RX_CHECK_PARITY
-#define SEG4_CYC 4
+#define SEG4_CYC 7
 	/* Park the byte, gated.  r1 here is SEG3's "a byte finished" mask,
 	 * NOT the CRC's later count>=3 mask - parity needs no such gate,
 	 * because SYNC and PID contribute a known constant (CRC_PARITY.md
@@ -377,15 +442,17 @@ usb_rx_cell\idx:
 	 * which is exactly the window the CRC16 build parks its table value
 	 * in.  The byte must be taken HERE and not in SEG6: SEG5 shifts it
 	 * out of r3. */
-	.macro  SEG4			/* 4: park the emitted byte           */
+	.macro  SEG4			/* 7: 3 of SEG3, then park the byte   */
+	SEG3_TAIL			/* 3                                  */
 	mov     r2, r3			/* 1  accumulator; byte in bits 0..7  */
 	uxtb    r2, r2			/* 1  drop the sentinel and leftovers */
 	ands    r2, r1			/* 1  zero unless a byte finished     */
 	mov     r8, r2			/* 1  park                            */
 	.endm
 #else
-#define SEG4_CYC 0
-	.macro  SEG4			/* 0: no receive check                */
+#define SEG4_CYC 3
+	.macro  SEG4			/* 3: SEG3's tail, and no check       */
+	SEG3_TAIL			/* 3                                  */
 	.endm
 #endif
 
@@ -456,7 +523,7 @@ usb_rx_cell\idx:
 	mvns    r1, r1			/* 1  NRZI: no transition = data 1    */
 	uxtb    r1, r1			/* 1  bit7 = first bit in time        */
 	lsls    r2, r1, #28		/* 1  \                               */
-	lsrs    r2, r2, #27		/* 1  / low nibble * 2                */
+	lsrs    r2, r2, #26		/* 1  / low nibble * 4                */
 	mov     r8, r2			/* 1  park for SEG1                   */
 	lsrs    r1, r1, #4		/* 1  high nibble                     */
 	.endm
@@ -474,8 +541,51 @@ usb_rx_cell\idx:
 	.set    CYC, 16
 	.endm
 
+/* ================= the free cycles, and what will not fit ================
+ * Measured on the assembled object, flash-resident, USB_RX_CHECK=CRC16 and
+ * T_CRC16 at offset 0 - the nops CELL emits, per wire byte:
+ *
+ *   cell   0  1  2  3  4  5  6  7      total
+ *   free   4  0  2  1  1  0  1  0        9
+ *
+ * Nine, which is what CRC_ROUND2.md S3 predicts for this configuration.
+ * CRC_ROUND2.md S3.2 then spends 28 of them - across wire bytes 2..5 - on
+ * pre-staging the tail's SYNC compare, PID complement, PID type dispatch,
+ * "is a response owed" and the C-call marshalling.  THAT DOES NOT FIT HERE,
+ * and the reason is placement rather than budget:
+ *
+ * 1. There is no branch-free way to run a fragment on ONE wire byte.  The
+ *    chain is unrolled on wire BITS and every wire byte runs the same eight
+ *    cells; nothing distinguishes byte 2 from byte 7 without a test, and a
+ *    taken branch inside a cell is 2-3 cycles that the cell does not have.
+ *    So pre-staging costs its price on EVERY wire byte, against 9 free -
+ *    not 28 spread over four bytes' 36.
+ * 2. Within a cell the only register that may be written is r2: CELL
+ *    clobbers it at the next boundary, and every other register is live
+ *    across it (r0 count, r1 entry/mask, r3 accumulator, r4 tables, r5
+ *    packer, r6 mask, r7 GPIO, r9-r12, r14).  r8 is free only between
+ *    SEG1's `mov r1,r8` in cell 1 and SEG4's `mov r8,r2` in cell 4, i.e.
+ *    in cells 2 and 3, which hold 2 and 1 of the free cycles.
+ * 3. Flash-resident, a byte of rxbuf costs 4 to read (FLASH_TIMING.md), so
+ *    the cheapest possible first step - `mov r2,r9 / ldrb r2,[r2,#1]` to
+ *    fetch the PID - is 5 cycles, and it has to sit in a cell where r8 is
+ *    free to carry the result to the store.  Cells 2 and 3 have 2 and 1.
+ *    It does not fit before any of the computation, the dispatch table
+ *    lookup or the 4-cycle `str` of the staged word is counted; the whole
+ *    of P1 alone is ~14 per wire byte against 9.
+ *
+ * The 28 cycles are real and the 9 free cycles are real; what is not real
+ * is the assumption that a cycle free in cell 0 can be spent by work that
+ * needs a carrier register in cell 3.  Pre-staging needs either a spare
+ * register across the cell boundary or a cheap per-byte gate, and this
+ * engine has neither.  turnaround_sketch.S's 12-cycle tail assumes the work
+ * has already moved; it has not, and the tail below is still 55 cycles from
+ * the stuffing-violation test to the `bl` (measured, flash, DATA path).
+ */
+
 /* ========================================================================= */
-	.section .datacode, "ax", %progbits	/* RAM-resident: see the header */
+	USB_ENGINE16_SECTION		/* .text.engine16, or .datacode:     */
+					/* see the placement note above      */
 	.balign 4
 	.global usb_rx_engine16
 	.thumb_func
@@ -671,16 +781,16 @@ rx_eop3:	movs    r2, #5
 	movs    r3, #1			/* 1  sentinel at bit 0              */
 	movs    r5, #1			/* 1  last SYNC sample was K: D+ = 1 */
 	movs    r1, #0			/* 1  SYNC high nibble               */
-	movs    r2, #2			/* 1  SYNC low nibble * 2            */
+	movs    r2, #4			/* 1  SYNC low nibble * 4            */
 	mov     r8, r2			/* 1                                 */
 	movs    r2, #0			/* 1                                 */
-	mov     r11, r2			/* 1  unstuff state 0                */
 	mov     r12, r2			/* 1  no bytes emitted yet           */
-	nop				/* 1  \                              */
-	nop				/* 1   | phase padding: 9 + 5 = 14   */
-	nop				/* 1   | cycles; an odd nop count also*/
-	nop				/* 1   | keeps usb_rx_chain 4-aligned */
-	nop				/* 1  /                              */
+	movs    r2, #(T_UT >> 8)	/* 1  \ unstuff state 0, biased with */
+	lsls    r2, r2, #8		/* 1   | T_UT: r11 IS the next index */
+	mov     r11, r2			/* 1  /  base, table offset included */
+	nop				/* 1  \  phase padding: 11 + 3 = 14  */
+	nop				/* 1   | cycles, and 14 halfwords is  */
+	nop				/* 1  /  4-aligned at usb_rx_chain    */
 	/* falls straight into usb_rx_cell0 - no branch, no ambiguity */
 
 /* ======================= the timed chain: 8 cells x 16 ===================
@@ -704,11 +814,11 @@ usb_rx_chain:
 	USE     9			/* 5 + 9  + 2 nop = 16               */
 	CELL    3
 	SEG3
-	USE     11			/* 5 + 11 + 0     = 16               */
+	USE     SEG3_CYC		/* flash 5+10+1nop; RAM 5+8+3nop     */
 	CELL    4
 	SEG4
-	USE     SEG4_CYC		/* CRC16 5+9+2nop; parity 5+4+7nop;  */
-					/* none 5+0+11nop.  Always 16.       */
+	USE     SEG4_CYC		/* CRC16 5+10+1nop; parity 5+7+4nop; */
+					/* none 5+3+8nop.  Always 16.        */
 	CELL    5
 	SEG5    .Lovf_a
 	USE     11			/* 5 + 11 + 0     = 16               */
@@ -767,7 +877,7 @@ rx_flush7:
 	lsls    r1, r1, r2
 	uxtb    r1, r1
 	lsls    r2, r1, #28
-	lsrs    r2, r2, #27
+	lsrs    r2, r2, #26
 	mov     r8, r2
 	lsrs    r1, r1, #4
 	SEG0
@@ -798,8 +908,9 @@ rx_flush7:
  * comparison - which is exactly why CRC stays in the bit cell and does not
  * move to the tail (PRIOR_ART S-2). */
 .Lrx_tail:
-	mov     r2, r11
-	cmp     r2, #(7 << 5)		/* sticky stuffing violation         */
+	mov     r2, r11			/* T_UT | state<<6 - the biased form */
+	lsrs    r2, r2, #6		/* the state, T_UT>>6 above it       */
+	cmp     r2, #((T_UT >> 6) + 7)	/* sticky stuffing violation         */
 	beq     .Ldone_t
 
 	mov     r6, r9			/* rxbuf base                        */
@@ -843,6 +954,18 @@ rx_flush7:
 .Ldata:
 	cmp     r0, #4			/* SYNC + PID + CRC16 at least       */
 	blo     .Lusb_done
+	/* CRC_ROUND2.md S1.4: the complement test above admits four PIDs of
+	 * type 3, and only two of them are legal on a low-speed bus - DATA0
+	 * (0xC3) and DATA1 (0x4B).  The other two are DATA2 (0x87) and MDATA
+	 * (0x0F), high-speed PIDs, and 0x87 is exactly what a one-cell sample
+	 * slip inside the PID turns DATA0 into: its nibbles are still
+	 * complements, so nothing upstream rejects it, and 79 of the 346
+	 * undetected slips in that study were this alias.  The four differ in
+	 * bit 2 - low nibble 3, B legal; 7, F not - so one shifted test
+	 * separates them, and a packet that reached here with 0x87 or 0x0F is
+	 * either corrupt or not addressed to a low-speed device. */
+	lsls    r1, r5, #29		/* PID bit 2 -> sign: DATA2 or MDATA */
+	bmi     .Lusb_done
 #if USB_RX_CHECK == USB_RX_CHECK_CRC16
 	mov     r1, r10
 	ldr     r2, =0x0000B001
