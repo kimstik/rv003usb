@@ -39,6 +39,7 @@ import engine16_rx_bus as rxbus                                     # noqa: E402
 from engine16_rx_bus import Bus, wire, crc16, CELL                  # noqa: E402
 
 ENGINE = os.path.join(ROOT, "doc/py32/engine16_merged.S")
+SOURCE = [ENGINE]                   # --source overrides; see variant()
 TX = os.path.join(ROOT, "doc/py32/engine16_tx.S")
 
 PID = 0xC3                              # DATA0
@@ -75,13 +76,19 @@ KEDGE_RE = re.compile(r"(^\.Lk_edge:\n\t\.rept   )(\d+)(\n)", re.M)
 PRIME_RE = re.compile(r"(^\tmov     r11, r2\t\t\t/\* 1  /  base[^\n]*\n)"
                       r"((?:\tnop[^\n]*\n)*)", re.M)
 
-ASSERT_RE = re.compile(r"(\t\.if     \(usb_rx_chain - \.Lprime\) != )(\d+)")
+ASSERT_RE = re.compile(
+    r"(\t\.if     \((?:usb_rx_chain|\.Lprime_end) - \.Lprime\) != )(\d+)")
 
 
 ENTRY_ANCHOR = ("\tldr     r2, =(usb_rx_chain + 1)\t/* chain head, bit0 set for bx"
                 "       */\n\tmov     r14, r2\n")
 DEL_FROM = ".Lsync_hunt:\n"
-DEL_TO = "\t.balign 4\t\t\t/* align HERE, not at the chain head,"
+# The lock used to sit between the EOP stubs and the chain head and end just
+# before this .balign; it now sits in front of the stubs and ends just before
+# INS_BEFORE.  Both layouts are transformable, so the table in
+# SAMPLE_POINT.md stays reproducible from either side of the change:
+#   engine16_rx_sweep.py --source <old file> --polls orig ...
+DEL_TO_OLD = "\t.balign 4\t\t\t/* align HERE, not at the chain head,"
 CHAIN = "usb_rx_chain:\n"
 INS_BEFORE = ("/* EOP stubs for cells 0..3 sit in front of the chain so that a"
               " backward\n")
@@ -172,12 +179,21 @@ def variant(text, poll, k, p):
     if not mo:
         raise SystemExit("unknown poll " + poll)
     shape, m, reloc = mo.group(1), int(mo.group(2) or 0), bool(mo.group(3))
-    a, b = text.index(DEL_FROM), text.index(DEL_TO)
+    old_layout = DEL_TO_OLD in text
+    if not old_layout:
+        reloc = True            # the lock is already in front of the stubs
+    a = text.index(DEL_FROM)
+    b = text.index(DEL_TO_OLD) if old_layout else text.index(INS_BEFORE)
     body = hunt(shape, m, reloc) + kedge(k, reloc) + prime(text, p, reloc)
-    if reloc:
+    if reloc and old_layout:
         c = text.index(CHAIN)
-        t = text[:a] + text[b:c].split(DEL_TO)[0] + "\t.balign 4\n" + text[c:]
+        t = text[:a] + text[b:c].split(DEL_TO_OLD)[0] + "\t.balign 4\n" + text[c:]
         t = t.replace(INS_BEFORE, body + "\n" + INS_BEFORE, 1)
+        t = ASSERT_RE.sub(
+            lambda mm: "\t.if     (.Lprime_end - .Lprime) != " + str(22 + 2 * p),
+            t, count=1)
+    elif reloc:
+        t = text[:a] + body + "\n" + text[b:]
         t = ASSERT_RE.sub(
             lambda mm: "\t.if     (.Lprime_end - .Lprime) != " + str(22 + 2 * p),
             t, count=1)
@@ -325,7 +341,7 @@ def job(a):
     poll, k, p, quick, dribble, jitter = a
     wd = tempfile.mkdtemp(prefix="e16sw.")
     try:
-        text = open(ENGINE).read()
+        text = open(SOURCE[0]).read()
         src = variant(text, poll, k, p)
         ents = TOL_ENTRIES[::3] if quick else None
         r = measure(src, wd, "s", entries=ents,
@@ -364,15 +380,18 @@ def main():
     ap.add_argument("--p", default="3")
     ap.add_argument("--dribble", type=float, default=DRIBBLE,
                     help="EOP dribble held in the first SE0 cell, in cycles")
+    ap.add_argument("--source", default=ENGINE,
+                    help="engine to transform (e.g. a pre-change checkout)")
     ap.add_argument("--jitter", type=float, default=0.0,
                     help="per-transition jitter, cycles (0.6 = 25 ns at 24MHz)")
     ap.add_argument("--verify", action="store_true",
                     help="measure the committed source on the full grid")
     args = ap.parse_args()
+    SOURCE[0] = args.source
 
     if args.verify:
         wd = tempfile.mkdtemp(prefix="e16sw.")
-        r = measure(open(ENGINE).read(), wd, "v", dribble=args.dribble,
+        r = measure(open(args.source).read(), wd, "v", dribble=args.dribble,
                     jitter=args.jitter)
         print("committed source, full grid:")
         print(fmt(("committed", -1, -1), r))
