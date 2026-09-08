@@ -418,6 +418,8 @@ class Machine:
         self.dev = [(0, False, 0, 0)]   # (cycle, oe, dp, dm)
         self.samples = []               # (cycle, level) - every IDR read
         self.pc_trace = set()
+        self.calls = {}                 # symbol -> times entered
+        self.watch = {}
         self.stray = []                 # writes to the shim peripheral page
 
     # ------------------------------------------------------------ the clock
@@ -435,6 +437,9 @@ class Machine:
         sz, mnem, ops = self.ins.get(address, (size, "nop", ""))
         self.pending = (address, sz, mnem, ops, None)
         self.pc_trace.add(address)
+        nm = self.watch.get(address)
+        if nm:
+            self.calls[nm] = self.calls.get(nm, 0) + 1
 
     def _price(self, mnem, ops, region, taken):
         flash_regs, ioport_regs = (), ()
@@ -547,6 +552,9 @@ class Response:
         self.released = True
         self.final = J
         self.collided = False
+        self.drive_from = None      # cycle the pins became outputs
+        self.drive_to = None        # cycle they were released
+        self.host_eop = None        # cycle the host's EOP SE0 began
 
 
 class Host:
@@ -575,6 +583,11 @@ class Host:
 
         r = Response()
         r.err = err
+        # the host's EOP: the first of the two SE0 bit times at the end
+        for i in range(len(levels) - 1):
+            if levels[i] == SE0:
+                r.host_eop = t0 + CELL * i
+                break
         # tau: the first IDR sample of this packet that read SE0
         for c, lv in m.samples:
             if lv == SE0:
@@ -613,6 +626,8 @@ class Host:
             r.released = not m.dev[-1][1]
             r.final = m.line(m.dev[-1][0] + 1)
             dev_end = m.dev[-1][0]
+            r.drive_from = t_oe
+            r.drive_to = dev_end
         else:
             dev_end = 0
         self.t = max(host_end, dev_end) + IPG
@@ -676,6 +691,13 @@ class Host:
 # optional data stage of one or more IN or OUT transactions, and a status
 # stage in the opposite direction.
 # ==========================================================================
+# turnaround.md S2 derives the legal window for the device's first response
+# bit, in cycles after tau (the SE0-detecting IDR read): [tau+60, tau+124].
+# The floor is USB 2.0 S7.1.18's 2-bit-time minimum inter-packet delay and
+# the deadline its 6.5-bit-time maximum, both referred to SE0->J.
+FLOOR, DEADLINE = 60, 124
+
+
 class Problem:
     def __init__(self, where, what, detail=""):
         self.where, self.what, self.detail = where, what, detail
@@ -746,6 +768,82 @@ class Enum:
             self.bad(label, "expected silence, device " + what)
             return False
         return True
+
+    # ---- the shape of an aborted drive ----------------------------------
+    def hold(self, r):
+        """How long the device holds the bus past the point the host is
+        entitled to start its next packet.  S7.1.18: the host may begin
+        transmitting two bit times after the end of the previous packet's
+        EOP, so anything the device is still driving then is a collision."""
+        if not r.drove or r.host_eop is None:
+            return None
+        host_free = r.host_eop + 3 * CELL + 2 * CELL   # EOP is SE0,SE0,J
+        return r.drive_to - host_free
+
+    def describe_abort(self, r):
+        h = self.hold(r)
+        return ("held the bus for %d cycles = %.1f bit times past the "
+                "earliest legal start of the host's next packet"
+                % (h, h / 16.0)) if h and h > 0 else \
+               ("released it %d cycles before the host's next packet may "
+                "start" % (-h if h else 0))
+
+    def check_wrong_address_in(self, r):
+        label = "IN token addressed to another device"
+        self.record(label, r, "abort")
+        if not r.drove:
+            return
+        self.bad(label,
+                 "device drove the bus in reply to an IN for address 7",
+                 "the Design B IN path enables the pin drivers "
+                 "(engine16_merged.S TBARM) and emits eight SYNC bit times "
+                 "BEFORE the gate that compares the token halfword, so the "
+                 "address is not consulted until the device is already "
+                 "driving.  It then " + self.describe_abort(r) +
+                 " - on top of whatever the device the token was addressed "
+                 "to is driving at the same moment.")
+
+    def check_bad_endpoint_in(self, r):
+        label = "IN token for endpoint 3 (>= ENDPOINTS)"
+        self.record(label, r, "abort")
+        if not r.drove:
+            return
+        self.bad(label, "device drove the bus for an endpoint it does not "
+                        "have", self.describe_abort(r))
+
+    def check_bad_crc(self, r):
+        label = "DATA with a wrong CRC16"
+        self.record(label, r, "abort")
+        if not r.drove:
+            self.notes.append("a DATA with a bad CRC16 got no response - "
+                              "correct, and the host will retry")
+            return
+        p = r.pkt or {}
+        if p.get("type") == "handshake" and p.get("pid") == PID_ACK:
+            self.bad(label, "device ACKED a packet whose CRC16 is wrong")
+            return
+        self.notes.append(
+            "a DATA with a bad CRC16 is answered with a deliberately corrupt "
+            "frame, not an ACK (turnaround.md S6.4) - the analyser reads it "
+            "as %s.  The device %s."
+            % (p.get("why", p.get("type")), self.describe_abort(r)))
+
+    def check_ack_response(self, r):
+        label = "the host's ACK at the end of an IN transaction"
+        self.record(label, r, "abort")
+        if not r.drove:
+            self.notes.append("the host's ACK draws no response - correct")
+            return
+        self.bad(label, "device drove the bus in reply to the host's ACK",
+                 "an ACK is SYNC + PID + EOP, so at EOP the PID byte has "
+                 "not yet been committed to usb_rxbuf: the pipeline commits "
+                 "byte N during byte N+1's cells and there is no byte N+1.  "
+                 "EOPSTUB's `ldrb r2,[r9,#1]` therefore reads the PREVIOUS "
+                 "packet's PID, which for the ACK that closes an IN "
+                 "transaction is the IN token's 0x69, and the IN response "
+                 "path is entered for a packet that is not a token.  The "
+                 "gate rejects it, but only after TBARM has enabled the "
+                 "drivers: the device " + self.describe_abort(r) + ".")
 
     def in_transaction(self, label, addr, endp, allow_retry=2):
         """One IN transaction, with the retries a real host performs on a
@@ -832,10 +930,20 @@ def setup_packet(bmRequestType, bRequest, wValue, wIndex, wLength):
 
 
 def descriptors_from_image(elf, syms):
-    """The descriptor bytes AS LINKED, read out of the ELF - so the wire
-    comparison is against the image, not against a second transcription of
-    usb_config.h."""
-    out = {}
+    """The descriptor table AS LINKED, read out of the image.
+
+    Not a transcription of usb_config.h: descriptor_list is the array
+    rv003usb.c:461 itself searches, so reading it out of flash gives exactly
+    the (lIndexValue, address, length) triples the device will answer with -
+    including the two cases where the length is NOT the descriptor's own
+    first byte (the configuration descriptor, whose wTotalLength is 0x22
+    while bLength is 9, and the HID report descriptor, which has no length
+    byte at all).  Reading bLength instead silently asks for the wrong number
+    of bytes and the comparison then passes on a prefix.
+
+    struct descriptor_list_struct is { uint32_t lIndexValue; const uint8_t
+    *addr; uint8_t length; } - 12 bytes with the tail padding."""
+    import struct as _s
     secs = sections(elf)
 
     def at(addr, n):
@@ -843,75 +951,57 @@ def descriptors_from_image(elf, syms):
             if vma <= addr < vma + len(blob):
                 return blob[addr - vma:addr - vma + n]
         return None
-    for name in ("device_descriptor", "config_descriptor", "gamepad_hid_desc",
-                 "string0", "string1", "string2", "string3"):
-        a = syms.get(name)
-        if a is None:
-            continue
-        first = at(a, 1)
-        out[name] = at(a, first[0]) if first else None
+    base = syms["descriptor_list"]
+    end = min((v for v in syms.values() if v > base), default=base + 96)
+    out = []
+    for off in range(0, end - base, 12):
+        rec = at(base + off, 12)
+        if rec is None or len(rec) < 12:
+            break
+        idx, adr, ln = _s.unpack("<IIB", rec[:9])
+        if adr == 0:
+            break
+        out.append((idx, adr, ln, at(adr, ln)))
     return out
 
 
 def enumerate_device(h, elf, syms, e):
-    D = descriptors_from_image(elf, syms)
+    tbl = descriptors_from_image(elf, syms)
+    e.notes.append("descriptor_list as linked: " +
+                   ", ".join("%08x/%dB" % (i, n) for i, _, n, _ in tbl))
+    by_idx = {i: (n, b) for i, _, n, b in tbl}
     ADDR = 3
 
     print("\n--- 0. a low-speed keep-alive EOP (S7.1.7.6) ---")
-    r = h.keepalive()
-    e.expect_silence("keep-alive EOP", r)
+    e.expect_silence("keep-alive EOP", h.keepalive())
 
     print("\n--- 1. GET_DESCRIPTOR(device, 8) at the default address ---")
     e.control_in("dev8", 0, setup_packet(0x80, 6, 0x0100, 0, 8), 8,
-                 expect=D["device_descriptor"][:8])
+                 expect=by_idx[0x100][1][:8])
 
-    print("\n--- 2. a token for another device, and a bad CRC ---")
-    e.expect_silence("SETUP to address 7",
-                     h.token(PID_SETUP, 7, 0, "SETUP a7 e0"))
-    e.expect_silence("IN to address 7", h.token(PID_IN, 7, 0, "IN a7 e0"))
-    e.expect_silence("IN to endpoint 3 (>= ENDPOINTS)",
-                     h.token(PID_IN, 0, 3, "IN a0 e3"))
-    # a SETUP the device does accept, then a DATA whose CRC16 is wrong: the
-    # device must not acknowledge it (S8.5.3.2 / S8.7.3).
-    h.token(PID_SETUP, 0, 0, "SETUP a0 e0")
-    lv = data_packet(PID_DATA0, setup_packet(0x80, 6, 0x0100, 0, 8))
-    bad = corrupt_crc(lv)
-    e.expect_silence("DATA0 with a wrong CRC16", h.send(bad, "DATA0 bad CRC"))
-
-    print("\n--- 3. SET_ADDRESS(%d) ---" % ADDR)
+    print("\n--- 2. SET_ADDRESS(%d) ---" % ADDR)
     e.control_out_nodata("setaddr", 0, setup_packet(0x00, 5, ADDR, 0, 0))
-    e.expect_silence("SETUP at the old address after SET_ADDRESS",
-                     h.token(PID_SETUP, 0, 0, "SETUP a0 e0 (stale address)"))
 
-    print("\n--- 4. GET_DESCRIPTOR(device, 18) at the new address ---")
-    e.control_in("dev18", ADDR, setup_packet(0x80, 6, 0x0100, 0, 18), 18,
-                 expect=D["device_descriptor"])
+    print("\n--- 3. the whole descriptor set at the new address ---")
+    plan = [("dev18", 0x0100, 0, 18),
+            ("cfg9", 0x0200, 0, 9),
+            ("cfgN", 0x0200, 0, by_idx[0x200][0]),
+            ("str0", 0x0300, 0, by_idx[0x300][0])]
+    for i in (1, 2, 3):
+        k = 0x04090300 + i
+        plan.append(("str%d" % i, 0x0300 + i, 0x0409, by_idx[k][0]))
+    plan.append(("hidrep", 0x2200, 0, by_idx[0x2200][0]))
+    for label, wv, wi, n in plan:
+        key = wv | (wi << 16)
+        want = by_idx[key][1][:n]
+        e.control_in(label, ADDR,
+                     setup_packet(0x81 if wv == 0x2200 else 0x80, 6, wv, wi, n),
+                     n, expect=want)
 
-    print("\n--- 5. GET_DESCRIPTOR(config) ---")
-    e.control_in("cfg9", ADDR, setup_packet(0x80, 6, 0x0200, 0, 9), 9,
-                 expect=D["config_descriptor"][:9])
-    full = len(D["config_descriptor"])
-    e.control_in("cfgN", ADDR, setup_packet(0x80, 6, 0x0200, 0, full), full,
-                 expect=D["config_descriptor"])
-
-    print("\n--- 6. the string descriptors ---")
-    e.control_in("str0", ADDR, setup_packet(0x80, 6, 0x0300, 0, 4), 4,
-                 expect=D["string0"])
-    for i, nm in ((1, "string1"), (2, "string2"), (3, "string3")):
-        n = len(D[nm])
-        e.control_in("str%d" % i, ADDR,
-                     setup_packet(0x80, 6, 0x0300 + i, 0x0409, n), n,
-                     expect=D[nm])
-
-    print("\n--- 7. GET_DESCRIPTOR(HID report) ---")
-    n = len(D["gamepad_hid_desc"])
-    e.control_in("hidrep", ADDR, setup_packet(0x81, 6, 0x2200, 0, n), n,
-                 expect=D["gamepad_hid_desc"])
-
-    print("\n--- 8. SET_CONFIGURATION(1) ---")
+    print("\n--- 4. SET_CONFIGURATION(1) ---")
     e.control_out_nodata("setcfg", ADDR, setup_packet(0x00, 9, 1, 0, 0))
 
-    print("\n--- 9. the interrupt endpoint ---")
+    print("\n--- 5. the interrupt endpoint ---")
     seen = []
     for i in range(4):
         p, r = e.in_transaction("ep1#%d" % i, ADDR, 1)
@@ -919,27 +1009,150 @@ def enumerate_device(h, elf, syms, e):
             seen.append((p["pid"], p["payload"]))
             h.handshake(PID_ACK, "host ACK")
     if seen:
-        pids = [s[0] for s in seen]
-        want = [pids[0]] + [PID_DATA0 if pids[0] == PID_DATA1 else PID_DATA1,
-                            pids[0]][:0]
-        alt = all(pids[i] != pids[i + 1] for i in range(len(pids) - 1))
-        if not alt:
-            e.bad("endpoint 1 toggle",
-                  "PIDs were %s - S8.6 requires alternation"
-                  % " ".join(PID_NAME.get(p, "%02X" % p) for p in pids))
+        pids = [x[0] for x in seen]
+        if pids[0] != PID_DATA0:
+            e.bad("endpoint 1", "first IN answered %s; an endpoint that has "
+                  "not been given a SET_INTERFACE or a ClearFeature(HALT) "
+                  "starts at DATA0 (S8.6.1)"
+                  % PID_NAME.get(pids[0], "%02X" % pids[0]))
+        if not all(pids[i] != pids[i + 1] for i in range(len(pids) - 1)):
+            e.bad("endpoint 1 toggle", "PIDs were %s - S8.6 requires "
+                  "alternation"
+                  % " ".join(PID_NAME.get(x, "%02X" % x) for x in pids))
         for pid, pay in seen:
             if len(pay) != 3:
-                e.bad("endpoint 1 payload",
-                      "%d bytes, the demo's handler sends 3" % len(pay))
-        del want
-    return D
+                e.bad("endpoint 1 payload", "%d bytes; the demo's handler "
+                      "sends 3" % len(pay))
+        e.notes.append("endpoint 1 delivered: " +
+                       " ".join(x[1].hex() for x in seen) +
+                       "  (the demo increments byte 0 once per render)")
+    return tbl
+
+
+def probes(h, elf, syms, e, tbl):
+    """The things only an end-to-end run can ask, each one isolated."""
+    ADDR = 3
+    by_idx = {i: (n, b) for i, _, n, b in tbl}
+
+    print("\n--- P1. a token addressed to another device ---")
+    e.expect_silence("SETUP to address 7", h.token(PID_SETUP, 7, 0))
+    r = h.token(PID_IN, 7, 0)
+    e.check_wrong_address_in(r)
+    e.expect_silence("OUT to address 7", h.token(PID_OUT, 7, 0))
+
+    print("\n--- P2. a token for an endpoint the device does not have ---")
+    r = h.token(PID_IN, ADDR, 3)
+    e.check_bad_endpoint_in(r)
+
+    print("\n--- P3. a DATA whose CRC16 is wrong ---")
+    h.token(PID_SETUP, ADDR, 0, "SETUP a%d e0" % ADDR)
+    lv = corrupt_crc(data_packet(PID_DATA0,
+                                 setup_packet(0x80, 6, 0x0100, 0, 8)))
+    e.check_bad_crc(h.send(lv, "DATA0 with a wrong CRC16"))
+    # ...and the transfer the corrupted SETUP started must not have taken:
+    # the device is still armed with whatever it had.  Re-run a good SETUP so
+    # the following probes start from a known state.
+    e.control_in("resync", ADDR, setup_packet(0x80, 6, 0x0100, 0, 8), 8,
+                 expect=by_idx[0x100][1][:8])
+
+    print("\n--- P4. does the device still answer the DEFAULT address? ---")
+    # S9.4.6: after SET_ADDRESS the device responds only to the new address.
+    h.token(PID_SETUP, 0, 0, "SETUP a0 e0")
+    r = h.data(PID_DATA0, setup_packet(0x80, 6, 0x0100, 0, 8),
+               "DATA0(setup) at address 0")
+    if r.drove and r.pkt and r.pkt.get("pid") == PID_ACK:
+        e.bad("default address after SET_ADDRESS",
+              "device ACKed a SETUP addressed to 0 while its address is %d"
+              % ADDR,
+              "S9.4.6: a device that has been assigned an address responds "
+              "only to that address.  On a bus with a second, unaddressed "
+              "device both would answer the enumerating token.")
+    e.record("SETUP a0 DATA0 after SET_ADDRESS", r, "DATA->handshake")
+
+    print("\n--- P5. a request the device cannot satisfy ---")
+    # S9.4.3: a GET_DESCRIPTOR for a descriptor that does not exist is a
+    # Request Error and the device must return STALL.
+    h.token(PID_SETUP, ADDR, 0)
+    r = h.data(PID_DATA0, setup_packet(0x80, 6, 0x0309, 0x0409, 8))
+    e.expect_handshake("unknown-descriptor SETUP ACK", r, PID_ACK)
+    p, r = e.in_transaction("unknown descriptor", ADDR, 0)
+    if p is not None:
+        e.bad("unsupported GET_DESCRIPTOR",
+              "device answered %s with %d bytes; S9.4.3 requires STALL"
+              % (PID_NAME.get(p["pid"], "%02X" % p["pid"]),
+                 len(p["payload"])),
+              "the C layer leaves e->max_len at 0 and usb_pid_handle_in "
+              "sends a zero-length packet, which a host reads as a valid "
+              "short transfer rather than as a request error.")
+    if p is not None:
+        h.handshake(PID_ACK)
+
+    print("\n--- P6. an OUT to the interrupt endpoint, which is IN-only ---")
+    h.token(PID_OUT, ADDR, 1)
+    r = h.data(PID_DATA0, b"\x01\x02\x03", "DATA0 to endpoint 1 OUT")
+    if r.drove and r.pkt and r.pkt.get("pid") == PID_ACK:
+        e.bad("OUT to an IN-only endpoint",
+              "device ACKed data for endpoint 1, which the configuration "
+              "descriptor declares as 0x81 (IN) only",
+              "S8.4.5: a transaction to an endpoint that does not exist in "
+              "the current configuration must be ignored or STALLed.")
+    e.record("OUT ep1 DATA0", r, "DATA->handshake")
+
+    print("\n--- P8. a foreign packet between a SETUP token and its DATA ---")
+    # Design B decides "a handshake is owed" from the PREVIOUS packet
+    # (turnaround.md S7.2) and the flag is consumed by whatever packet ends
+    # next.  On a bus with more than one device that need not be our DATA.
+    h.token(PID_SETUP, ADDR, 0, "SETUP a%d e0" % ADDR)
+    h.token(PID_SOF, 0, 0, "a token for someone else, in between")
+    r = h.data(PID_DATA0, setup_packet(0x80, 6, 0x0100, 0, 8),
+               "DATA0(setup), one packet late")
+    e.record("DATA->ACK with TB_OWED already spent", r, "DATA->handshake/slow")
+    if r.drove and r.pkt and r.pkt.get("pid") == PID_ACK \
+       and r.tau is not None and r.first_edge is not None:
+        d = r.first_edge - r.tau
+        if d > DEADLINE:
+            e.bad("DATA->ACK after an intervening packet",
+                  "the ACK's first edge is at tau+%d, %d cycles past the "
+                  "tau+%d deadline (%.1f bit times after SE0->J against the "
+                  "6.5 the specification allows)"
+                  % (d, d - DEADLINE, DEADLINE, (d - 24) / 16.0),
+                  "TB_OWED is armed by the SETUP token and consumed by the "
+                  "END of the next packet, whatever it is.  One foreign "
+                  "packet in between spends it, the Design B path does not "
+                  "run, and the ACK falls back to usb_send_data - which is "
+                  "the ordinary transmit engine, entered after the whole C "
+                  "dispatch.  The host times out and retries the transfer.")
+    # put the device back in a known state
+    e.control_in("resync2", ADDR, setup_packet(0x80, 6, 0x0100, 0, 8), 8)
+
+    print("\n--- P7. what the device does with the host's ACK ---")
+    # The host ACK ends every IN transaction.  S8.5.1: the host may begin the
+    # next transaction one inter-packet delay (2 bit times) later.
+    p, r = e.in_transaction("ackprobe", ADDR, 1)
+    if p is not None:
+        r2 = h.handshake(PID_ACK, "host ACK after an IN")
+        e.check_ack_response(r2)
+
+
+def stuff_count(pidb, payload):
+    """How many zeros S7.1.9 inserts into this packet.  The wire byte
+    boundary the receive chain counts from is SYNC + 8k, so the cell K in
+    which SE0 lands is exactly this count mod 8 - which is why a real
+    enumeration, whose packets are all the same lengths, only ever exercises
+    two of the eight EOP stubs."""
+    c = crc16(bytes(payload))
+    body = [pidb] + list(payload) + [c & 0xFF, (c >> 8) & 0xFF]
+    bits = []
+    for b in body:
+        bits += lsb_bits(b)
+    return len(stuff(bits)) - len(bits)
 
 
 def corrupt_crc(levels):
-    """Flip one payload bit of an already-encoded DATA packet, re-NRZI it,
-    and leave the CRC16 as it was: what a receiver must reject."""
-    # decode back to data bits, flip one, re-encode - the packet stays a
-    # legal NRZI/stuffed frame whose CRC no longer matches.
+    """Flip one payload bit of an already-encoded DATA packet and re-encode
+    it, leaving the CRC16 as it was.  The frame stays legal NRZI with legal
+    bit stuffing; only S8.3.5.2's check fails, which is exactly the error a
+    receiver must not acknowledge."""
     prev = J
     bits = []
     for lvl in levels:
@@ -952,57 +1165,163 @@ def corrupt_crc(levels):
     return nrzi(SYNC_BITS + stuff(data)) + [SE0, SE0, J]
 
 
-# ==========================================================================
-# 6.  THE REPORT.
-#
-# turnaround.md S2 derives the legal window for the device's first response
-# bit, in cycles after tau (the SE0-detecting IDR read):  [tau+60, tau+124].
-# S11 claims tau+115 for DATA->ACK, audit_discarded.md F.6 revises that to
-# tau+108 and gives tau+95 for IN->DATA.  Nothing had executed either.
-# ==========================================================================
-FLOOR, DEADLINE = 60, 124
+def timing_sweep(elf, syms, latency, per_k=4):
+    """The DATA->ACK turnaround at every K.
+
+    turnaround.md S7 gives a different first-edge cycle for each of the eight
+    EOP stubs and audit_discarded.md F.6 revises four of them; neither has
+    ever been executed.  Payloads are SEARCHED for by stuff count so that all
+    eight are reached, not waited for."""
+    import random
+    rnd = random.Random(20260908)
+    want = {k: [] for k in range(8)}
+    tries = 0
+    while any(len(v) < per_k for v in want.values()) and tries < 60000:
+        tries += 1
+        n = rnd.randrange(1, 9)
+        pay = bytes(rnd.choice((0, 0xFF, 0x7F, 0xFE, 0xF0, 0x3F, 0xFC, 0xCF,
+                                rnd.randrange(256))) for _ in range(n))
+        k = stuff_count(PID_DATA0, pay) & 7
+        if len(want[k]) < per_k and pay not in want[k]:
+            want[k].append(pay)
+    m = Machine(elf, syms)
+    h = Host(m, latency=latency)
+    got = {}
+    for k in range(8):
+        for pay in want[k]:
+            h.token(PID_SETUP, 0, 0)
+            r = h.data(PID_DATA0, pay)
+            if not r.drove or r.tau is None or r.first_edge is None:
+                continue
+            if r.pkt is None or r.pkt.get("pid") != PID_ACK:
+                continue
+            got.setdefault(r.K, []).append(r.first_edge - r.tau)
+    return ({k: (min(v), max(v), len(v)) for k, v in got.items()},
+            {k: len(v) for k, v in want.items()})
 
 
-def report(e, h):
+def probe_address_timing(elf, syms, latency, e):
+    """S9.2.6.3: the new device address takes effect AFTER the status stage
+    of SET_ADDRESS completes.  A fresh machine, because this deliberately
+    interrupts a control transfer."""
+    m = Machine(elf, syms)
+    h = Host(m, latency=latency)
+    ADDR = 5
+    # warm the arm pattern for (address 0, endpoint 0) so a silent answer
+    # here means "filtered", not "not yet rendered"
+    h.token(PID_SETUP, 0, 0)
+    h.data(PID_DATA0, setup_packet(0x80, 6, 0x0100, 0, 8))
+    for _ in range(2):
+        h.token(PID_IN, 0, 0)
+    h.handshake(PID_ACK)
+    # SET_ADDRESS, setup stage only
+    h.token(PID_SETUP, 0, 0)
+    r = h.data(PID_DATA0, setup_packet(0x00, 5, ADDR, 0, 0))
+    if not (r.pkt and r.pkt.get("pid") == PID_ACK):
+        e.notes.append("address-timing probe: the SET_ADDRESS data stage was "
+                       "not ACKed, so the probe proves nothing")
+        return
+    # the status stage has NOT run yet.  A token for the new address must be
+    # ignored until it has.
+    r2 = h.token(PID_IN, ADDR, 0)
+    early = r2.drove
+    # and now the status stage
+    h.token(PID_IN, 0, 0)
+    if early:
+        e.bad("SET_ADDRESS takes effect too early",
+              "a token for address %d was answered before the status stage "
+              "of SET_ADDRESS had run" % ADDR,
+              "rv003usb.c:478 writes ist->my_address inside "
+              "usb_pid_handle_data, i.e. during the DATA stage.  S9.2.6.3 "
+              "requires the device to keep responding at its old address "
+              "until the status stage completes.  It is benign here only "
+              "because the engine also accepts address 0 unconditionally, "
+              "so the status IN still reaches it.")
+    else:
+        e.notes.append("SET_ADDRESS: a token for the new address before the "
+                       "status stage drew no response")
+
+
+def report(e, h, ksweep=None, kwant=None):
     print("\n" + "=" * 74)
-    print("TURNAROUND, MEASURED  (cycles from tau, the SE0-detecting IDR "
-          "read,\n                       to the first driven J->K edge)")
+    print("TURNAROUND, MEASURED")
+    print("  cycles from tau - the SE0-detecting IDR read, turnaround.md S2's")
+    print("  reference point - to the first driven J->K edge.  The legal")
+    print("  window derived there is [tau+%d, tau+%d]." % (FLOOR, DEADLINE))
     print("=" * 74)
     byk = {}
     for label, K, d, kind in e.turnarounds:
         byk.setdefault((kind, K), []).append((d, label))
-    if not byk:
-        print("  no responses were measured")
-    print("  %-16s %3s %8s %8s %5s   %s"
+    print("  %-18s %3s %9s %9s %5s   %s"
           % ("path", "K", "min", "max", "n", "verdict"))
     worst = {}
-    for (kind, K) in sorted(byk, key=lambda x: (x[0], x[1] if x[1] is not None else -1)):
-        v = [d for d, _ in byk[(kind, K)]]
+    for kk in sorted(byk, key=lambda x: (x[0], -1 if x[1] is None else x[1])):
+        kind, K = kk
+        v = [d for d, _ in byk[kk]]
         lo, hi = min(v), max(v)
-        bad = "OVER DEADLINE" if hi > DEADLINE else (
-            "under floor" if lo < FLOOR else "in [%d,%d]" % (FLOOR, DEADLINE))
-        print("  %-16s %3s %8s %8s %5d   %s"
-              % (kind, K, "tau+%d" % lo, "tau+%d" % hi, len(v), bad))
-        w = worst.setdefault(kind, [999, -999])
-        w[0] = min(w[0], lo)
-        w[1] = max(w[1], hi)
+        verdict = "OVER THE DEADLINE" if hi > DEADLINE else (
+            "under the floor" if lo < FLOOR else "conformant")
+        print("  %-18s %3s %9s %9s %5d   %s"
+              % (kind, K, "tau+%d" % lo, "tau+%d" % hi, len(v), verdict))
+        w = worst.setdefault(kind, [10 ** 9, -10 ** 9])
+        w[0], w[1] = min(w[0], lo), max(w[1], hi)
+    print()
     for kind, (lo, hi) in sorted(worst.items()):
-        print("  %-16s over every K: tau+%d .. tau+%d   (%.2f .. %.2f bit "
-              "times after SE0->J)" % (kind, lo, hi, (lo - 24) / 16.0,
-                                       (hi - 24) / 16.0))
+        print("  %-18s tau+%d .. tau+%d  = %.2f .. %.2f bit times after "
+              "SE0->J" % (kind, lo, hi, (lo - 24) / 16.0, (hi - 24) / 16.0))
+    if ksweep:
+        print("\n  DATA->ACK at every K, forced by choosing payloads whose bit")
+        print("  stuffing moves the wire-byte boundary (a real enumeration")
+        print("  only ever produces two of the eight):")
+        print("    %3s %9s %9s %5s   %-12s %s"
+              % ("K", "min", "max", "n", "S7 predicts", "F.6 predicts"))
+        pred7 = {1: 111, 2: 100, 3: 91, 4: 81, 5: 71, 6: 60, 7: 63, 0: 103}
+        pred6 = {1: 108, 2: 97, 3: 88, 0: 95}
+        for K in sorted(ksweep):
+            lo, hi, n = ksweep[K]
+            print("    %3d %9s %9s %5d   %-12s %s"
+                  % (K, "tau+%d" % lo, "tau+%d" % hi, n,
+                     "tau+%d" % pred7[K] if K in pred7 else "-",
+                     "tau+%d" % pred6[K] if K in pred6 else "-"))
+        allv = [v for K in ksweep for v in ksweep[K][:2]]
+        print("    worst over every K: tau+%d  (deadline tau+%d), best "
+              "tau+%d (floor tau+%d)"
+              % (max(allv), DEADLINE, min(allv), FLOOR))
+        missing = [k for k in range(8) if k not in ksweep]
+        if missing:
+            print("    NOT REACHED: K = %s  (payloads found for each: %s)"
+                  % (", ".join(str(k) for k in missing),
+                     kwant and ", ".join("K%d:%d" % (k, kwant[k])
+                                         for k in missing)))
 
     print("\n" + "=" * 74)
     print("WHAT THE RUN FOUND")
     print("=" * 74)
     if not e.problems:
         print("  no problem detected by the checks this run performs.")
-    for p in e.problems:
-        print("  * " + str(p))
+    for i, pr in enumerate(e.problems):
+        print("  %d. %s" % (i + 1, pr))
+    if e.notes:
+        print("\nOBSERVED, NOT A DEFECT")
+        for n in e.notes:
+            print("  - " + _wrap(n))
     print("\n  packets sent by the host      %d" % len(h.log))
     print("  responses the device drove    %d"
           % sum(1 for _, r in h.log if r.drove))
     print("  host retries forced           %d" % e.retries)
     return 1 if e.problems else 0
+
+
+def _wrap(t, w=68, ind=" " * 4):
+    out, line = [], ""
+    for word in t.split():
+        if len(line) + len(word) + 1 > w:
+            out.append(line)
+            line = word
+        else:
+            line = (line + " " + word).strip()
+    out.append(line)
+    return ("\n" + ind).join(out)
 
 
 def main():
@@ -1014,42 +1333,62 @@ def main():
     ap.add_argument("--latency", type=int, default=16,
                     help="cycles from the D- edge to the first ISR "
                          "instruction (M0+ exception entry)")
-    ap.add_argument("--sweep-latency", action="store_true")
+    ap.add_argument("--sweep-latency", action="store_true",
+                    help="re-run the whole enumeration at every entry latency")
+    ap.add_argument("--no-ksweep", action="store_true")
     ap.add_argument("--keep", default=None, help="keep the build here")
     a = ap.parse_args()
 
     wd = a.keep or tempfile.mkdtemp(prefix="usbenum.")
     elf, syms = build(wd)
     print("linked %s" % elf)
-    for s in ("usb_rx_engine16", "usb_send_data", "usb_in_render",
-              "usb_pid_handle_setup", "usb_pid_handle_data",
-              "usb_pid_handle_in", "usb_handle_user_in_request",
-              "rv003usb_internal_data", "descriptor_list"):
-        if s not in syms:
-            raise SystemExit("the C layer did not link: %s is missing" % s)
-    print("  the REAL C layer is in the image: "
-          "usb_pid_handle_data @ %08x, descriptor_list @ %08x"
-          % (syms["usb_pid_handle_data"], syms["descriptor_list"]))
+    for sym in ("usb_rx_engine16", "usb_send_data", "usb_in_render",
+                "usb_pid_handle_setup", "usb_pid_handle_data",
+                "usb_pid_handle_in", "usb_handle_user_in_request",
+                "rv003usb_internal_data", "descriptor_list"):
+        if sym not in syms:
+            raise SystemExit("the C layer did not link: %s is missing" % sym)
+    print("  the REAL C layer is in the image: usb_pid_handle_data @ %08x, "
+          "descriptor_list @ %08x, usb_handle_user_in_request @ %08x"
+          % (syms["usb_pid_handle_data"], syms["descriptor_list"],
+             syms["usb_handle_user_in_request"]))
 
     if a.sweep_latency:
-        for lat in range(8, 41, 2):
+        import io
+        import contextlib
+        for lat in range(6, 49, 2):
             m = Machine(elf, syms)
             h = Host(m, latency=lat)
             e = Enum(h)
-            import io
-            import contextlib
             buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                enumerate_device(h, elf, syms, e)
-            print("latency %2d: %d problems, %d retries"
-                  % (lat, len(e.problems), e.retries))
+            try:
+                with contextlib.redirect_stdout(buf):
+                    tbl = enumerate_device(h, elf, syms, e)
+                    probes(h, elf, syms, e, tbl)
+                bad = len(e.problems)
+            except Exception as ex:
+                bad = "crashed: %s" % ex
+            print("  entry latency %2d cycles: %s problems, %d retries"
+                  % (lat, bad, e.retries))
         return 0
 
     m = Machine(elf, syms)
     h = Host(m, latency=a.latency, trace=a.trace)
     e = Enum(h)
-    enumerate_device(h, elf, syms, e)
-    return report(e, h)
+    for nm in ("usb_handle_user_in_request", "usb_pid_handle_in",
+               "usb_in_render", "usb_send_data", "usb_pid_handle_data"):
+        m.watch[syms[nm] & ~1] = nm
+    tbl = enumerate_device(h, elf, syms, e)
+    ep1_calls = dict(m.calls)
+    probes(h, elf, syms, e, tbl)
+    probe_address_timing(elf, syms, a.latency, e)
+    e.notes.append("C entry points executed during the enumeration: " +
+                   ", ".join("%s x%d" % (k, v)
+                             for k, v in sorted(ep1_calls.items())))
+    ks = kw = None
+    if not a.no_ksweep:
+        ks, kw = timing_sweep(elf, syms, a.latency)
+    return report(e, h, ks, kw)
 
 
 if __name__ == "__main__":
