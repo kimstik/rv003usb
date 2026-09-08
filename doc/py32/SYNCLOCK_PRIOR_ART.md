@@ -48,7 +48,7 @@ filled in from a README or from inference.
 
 | | ISA / clock | cycles per bit | how it finds SYNC | edge-detect granularity | where it samples in the cell | clock tolerance, and where the number comes from |
 |---|---|---|---|---|---|---|
-| **V-USB 12 MHz** | AVR, 12 MHz | 8 (`vusb usbdrvasm12.inc:16-17`) | `waitForJ` loop, then **unrolled** `waitForK` chain of 5 × (`sbis USBIN,USBMINUS` / `rjmp foundK`) (`:53-77`); one confirming sample one bit later, "we want two bits K", failure pops and re-enters `waitForK` (`:85-90`) | **2 cycles = 1/4 cell**; the source states the consequence: "The following code results in a sampling window of 1/4 bit which meets the spec" (`:58`) | **centre.** `foundK` is reached "{3, 5} after falling D- edge, average delay: 4 cycles [we want 4 for center sampling]" (`:79`) — the detection latency *is* the half-cell offset | none documented; the file requires "a 12 MHz crystal (not a ceramic resonator and not a calibrated RC oscillator)" (`:16-17`) |
+| **V-USB 12 MHz** | AVR, 12 MHz | 8 (`vusb usbdrvasm12.inc:16-17`) | `waitForJ` loop, then **unrolled** `waitForK` chain of 5 × (`sbis USBIN,USBMINUS` / `rjmp foundK`) (`:53-77`); one confirming sample one bit later, "we want two bits K", failure pops and re-enters `waitForK` (`:88-91`) | **2 cycles = 1/4 cell**; the source states the consequence: "The following code results in a sampling window of 1/4 bit which meets the spec" (`:58`) | **centre.** `foundK` is reached "{3, 5} after falling D- edge, average delay: 4 cycles [we want 4 for center sampling]" (`:79`) — the detection latency *is* the half-cell offset | none documented; the file requires "a 12 MHz crystal (not a ceramic resonator and not a calibrated RC oscillator)" (`:16-17`) |
 | **V-USB 16 MHz** | AVR, 16 MHz | 10.667 (`vusb usbdrvasm16.inc:28`) | same shape (`:46-72`) | 2 cycles (`:51`, "< 1/4 bit") | centre: "{3, 5} … average delay: 4 cycles [we want 5 for center sampling]" (`:74`) | none documented; crystal required (`:16-17`) |
 | **V-USB 18 / 20 MHz** | AVR, 18 / 20 MHz | 12 / 13.333 (`usbdrvasm18.inc:34`, `usbdrvasm20.inc:36`) | same shape | 2 cycles (`usbdrvasm20.inc:67`) | centre, stated as an explicit budget: "bit0 should be at 34 for center sampling. Currently at 4 so 30 cycles till bit 0 sample" (`usbdrvasm20.inc:97`) | none documented; crystal required |
 | **V-USB 12.8 MHz** | AVR, 12.8 MHz RC | 8.533 | same shape (`usbdrvasm128.inc:113-140`) | 2 cycles (`:118`) | centre: "{3, 5} … [we want 4 for center sampling]" (`:140`) | **claimed ±1 %** (`:19-20`); **derived in the source from the loop's own stretch range**: "min frequency: 67 cycles for 8 bit -> 12.5625 MHz / max frequency: 69.286 cycles for 8 bit -> 12.99 MHz / nominal frequency: 12.77 MHz ( = sqrt(min * max))" (`:44-46`) — i.e. the tolerance is a property of how far the receive loop can be stretched per byte by its PLL, not a spec quantity |
@@ -257,8 +257,9 @@ layout change, not a timing change.
 (`usbdrvasm165.inc:39-51`: "push only what is necessary to sync with edge ASAP"),
 and does the rest of the register saving *after* the lock — "we have 1 bit time
 for setup purposes" (`:80-81`), with the pushes interleaved into the first sampled
-bits (`:104-119`).  LemcUSB does the same in a smaller way: about 28 cycles of
-prologue before its hunt (`usb_internal_bitbangusb.s:108-136`).
+bits (`:104-119`).  LemcUSB does the same in a smaller way: ≈28 cycles of prologue
+before its hunt (`usb_internal_bitbangusb.s:108-136`; counted off the listing at
+ARMv6-M costs, not stated in the source).
 
 **Ours.**  Measured on the harness: with the ISR body entered at emulated cycle 6,
 the *first hunt sample* is at cycle 64 — **58 cycles of prologue** (SE0 test,
@@ -679,3 +680,38 @@ In measured order of value per cycle spent:
 4. **A per-byte bang-bang re-time** (§2.1/§2.2): the only mechanism that changes
    the *class* of the problem, from ±0.5 % to a few percent.  Needs cell 7
    re-balanced; do not start it before 1-3.
+
+## Appendix. Reproducing the measurements
+
+Everything measured here comes from `tools/engine16_rx_bus.py` (Unicorn, GPIO
+mapped as MMIO, IDR driven from a synthesized low-speed waveform indexed by an
+emulated cycle count).  The baseline numbers are what the tool prints unmodified:
+
+```
+$ python3 tools/engine16_rx_bus.py
+G6  entry latency that still decodes: 6..37 cycles = 0.38..2.31 bit times
+G7  locked sample offset in the 16-cycle cell, ...
+      min 9.0  max 15.9
+clock error that still decodes an 8-byte DATA0: -0.20% .. +1.00%
+```
+
+The variant numbers were produced by copying `doc/py32/engine16_merged.S` to a
+scratch directory, editing the copy (`.Lk_edge`'s `.rept 20`, and for the unroll
+the `.Lwait_k` block), and calling `prerender_check.build()` on the copy —
+`engine16_rx_bus.make()` with a different source path.  The three quantities are:
+
+* **band** — `engine16_rx_bus.sweep_offset(elf, syms, range(lo, hi+1), 8)` over
+  every usable entry latency × 8 sub-cycle packet phases, taking `min`/`max` of
+  the histogram and its failure count;
+* **guaranteed clock tolerance** — the ppm range for which *every* one of
+  {3 entry latencies} × {4 sub-cycle phases} decodes the 8-byte DATA0 byte for
+  byte, stepped at 500 ppm.  This is stricter than the tool's own `sweep_ppm`,
+  which fixes one entry latency and one phase and therefore reports a wider,
+  phase-lucky number (`-0.20 % .. +1.00 %` at entry 16, phase 0);
+* **dribble** — `Bus(..., dribble=N)` holds the last driven level for N device
+  cycles into the first SE0 cell (`engine16_rx_bus.py:143-147`).
+
+The instruction trace in §4.1 is a `UC_HOOK_CODE` hook on the same `Bus` object
+printing `(b.cyc, address)` against the disassembly from
+`prerender_check.disassemble()`; the per-cell spare-cycle table in §2.1 counts
+`nop` mnemonics between consecutive `usb_rx_cellN` symbols in the linked image.
