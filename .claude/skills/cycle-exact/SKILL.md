@@ -97,6 +97,32 @@ So: diff embedded tables against their generator, from the binary. And document 
 their generator rather than as data — it is shorter, unambiguous, and it makes the
 authority explicit.
 
+### At least one check must execute the linked image
+
+"Read the object, not the source" is not far enough. A checker can read the assembled
+object and still miss anything that only exists after linking — where a shared symbol
+landed, what a cross-file reference resolved to, whether a weak symbol got a definition.
+
+> A shared lookup table was moved 32 bytes to make room in front of it. A second consumer
+> in a different file indexed it from the old base. Both files assembled, both cycle
+> budgets held, and three separate bit-exact models passed — every one of them read the
+> table from the *source*, so every one of them was consistent with itself and with a
+> broken image. The one check that executed the linked image on an emulator threw on the
+> first packet.
+
+Two habits follow. Make cross-file offsets the **linker's** problem — export the symbol
+the other file needs (`.set base, label - 32`, `.global base`) instead of writing the
+number in two places; a comment saying "these must agree" is a defect waiting for its
+turn. And keep one check in the suite that runs the actual image, however slow: on a
+budget of many fast source-level models plus one slow executing one, the slow one is the
+only one that can fail for a reason the others structurally cannot see.
+
+Corollary, learned the same day: a verification that has never been *run* on the branch it
+is committed to does not exist. The executing check above had a missing import — its
+renderer module was never committed — so it had failed instantly since the day it was
+written, and the two defects hid each other. Run every checker from a clean checkout
+before believing any of them.
+
 ### Before believing "unmeasured", look
 
 A gap in your knowledge is not a gap in the record. Check the source document, run the
