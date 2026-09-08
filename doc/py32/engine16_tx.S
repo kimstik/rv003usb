@@ -49,17 +49,25 @@
  * ordinary instruction 1, GPIO store 1 (IOPORT), RAM load/store 2, BX 3,
  * B 2-3, taken conditional 2-3.
  *
- * MEASURED, and not previously recorded (FLASH_TIMING.md left this audit
- * outstanding): THIS ENGINE DOES NOT HOLD 16 CYCLES FROM FLASH.  TXSEG0's
- * `ldrb r0,[r3,#0]` and TXSEG2/TXSEG3's `strb` go to usb_txbuf, which is
- * RAM, and cost 4 there instead of 2; cells S0..S5 and S7 measure 18.  The
- * receive engine has one such access and FLASH_TIMING.md's redistribution
- * absorbs it; this one has three and there is no slack to absorb them -
- * tools/engine16_cyc.py --exec flash --ioport r7 --flashdata r14 --budget 16
- * shows each of them.  The default is still flash, because that is the
- * configuration the stack is built in and because the RX table has to be
- * where the RX code is; what this engine needs is its own redistribution,
- * and it has not been done.
+ * This engine holds 16 cycles in BOTH residencies.  It did not always: the
+ * three accesses to usb_txbuf - TXSEG0's `ldrb` and TXSEG2/TXSEG3's two
+ * `strb` - cost 4 from flash-resident code instead of 2, and put S0, S2 and
+ * S3 two cycles over.  (An earlier note here said seven cells were over.
+ * That was tools/engine16_cyc.py reading `--flashdata r14` and comparing it
+ * against objdump's `lr`, so every table lookup was charged as a RAM access;
+ * the tool now normalises the aliases and tracks the base through `mov`.)
+ *
+ * The three were bought back, not redistributed - there was nothing to
+ * redistribute, the flash column totalled 94 against 88:
+ *   TXSEG0  the commit mask stops being a two-sided pointer comparison
+ *           recomputed per byte and becomes one bit of a shift register
+ *           built at setup: 8 cycles down to 3.
+ *   TXSEG3  the two CRC `strb` become one `strh`, which needs the address
+ *           even, which the setup arranges by starting the stream one byte
+ *           in when the length is odd.  One RAM access instead of two.
+ * The flash column is now 81 and the RAM column 77, and each segment's own
+ * count is declared as TXSEG<n>_CYC so the cell padding follows the
+ * residency instead of assuming 11.  See engine16_tx.md S6.4.
  *
  * Post-review change (ENGINE16_REVIEW.md, the size item): this file holds the
  * one table block BOTH engines index, because the same 512-byte T_CRC16 was
@@ -119,9 +127,26 @@
 #endif
 #if USB_ENGINE16_FLASH
 #define USB_ENGINE16_SECTION    .section .text.engine16, "ax", %progbits
+#define USB_RAM_ACCESS          4
 #else
 #define USB_ENGINE16_SECTION    .section .datacode, "ax", %progbits
+#define USB_RAM_ACCESS          2
 #endif
+
+/* Per-segment cycle counts.  The staging buffer is in RAM whatever the engine
+ * does, so the two segments that touch it cost 2 cycles more when the engine
+ * runs from flash - the same asymmetry engine16_merged.S carries as
+ * USB_RAM_ACCESS.  The table block is in the engine's OWN section, so a
+ * lookup is 2 in both residencies and the segments that only read tables are
+ * the same number twice. */
+#define TXSEG0_CYC      (5+USB_RAM_ACCESS)
+#define TXSEG1_CYC      11
+#define TXSEG2_CYC      7
+#define TXSEG3_CYC      (7+USB_RAM_ACCESS)
+#define TXSEG4_CYC      11
+#define TXSEG5_CYC      11
+#define TXSEG6_CYC      11
+#define TXSEG7_CYC      11
 
 /* Table layout, one base register (r14).  Row 0 of the halfword table is
  * reused as the dispatch table, because the stuff state is stored as
@@ -188,7 +213,8 @@ usb_tx_\name:
  *   r7  GPIO base
  *   r8  pointer to the two CRC bytes in the staging buffer; doubles as the
  *       exhaustion anchor (TXSEG6/TXSEG7)
- *   r9  staging+3, the low edge of the CRC-commit window
+ *   r9  the commit shift register: bit k = 1 iff the k-th fetched byte is
+ *       NOT a payload byte.  Consumed one bit per TXSEG0.
  *   r10 running CRC16                  r11 (stuff state + 1) << 5
  *   r12 park: the data byte, then n_lo, then the queue
  *   r14 table base
@@ -201,18 +227,15 @@ usb_tx_\name:
  * with acc = data + 2^f,   acc + (m<<f) = data + (w<<f) + 2^(f+n).
  * ==================================================================== */
 
-	.macro  TXSEG0			/* 11: fetch the byte, build the mask */
-	ldrb    r0, [r3, #0]		/* 2  the byte to prepare             */
+	.macro  TXSEG0			/* fetch the byte, take the mask      */
+	ldrb    r0, [r3, #0]		/* A  the byte to prepare             */
 	adds    r3, #1			/* 1                                  */
-	mov     r1, r9			/* 1  staging+3                       */
-	subs    r1, r3, r1		/* 1  >=0 iff at or past the payload  */
-	asrs    r1, r1, #31		/* 1  -1 if too early (SYNC, PID)     */
-	mov     r2, r8			/* 1  CRC-byte pointer                */
-	subs    r2, r2, r3		/* 1  >=0 iff not yet past the payload*/
-	asrs    r2, r2, #31		/* 1  -1 if too late (the CRC bytes)  */
-	orrs    r1, r2			/* 1                                  */
-	mvns    r1, r1			/* 1  commit mask: -1 iff payload byte*/
-	.endm
+	mov     r1, r9			/* 1  the commit SHIFT REGISTER       */
+	lsrs    r1, r1, #1		/* 1  C = 1 iff this byte is NOT a    */
+	mov     r9, r1			/* 1     payload byte (MOV to a high  */
+					/*       register does not touch C)   */
+	sbcs    r1, r1			/* 1  0 if C, -1 if not: the mask     */
+	.endm				/*    = 5 + A                         */
 
 	.macro  TXSEG1			/* 11: CRC16 table step, gated        */
 	mov     r12, r0			/* 1  park the byte before r0 is lost */
@@ -227,7 +250,7 @@ usb_tx_\name:
 	ands    r0, r1			/* 1  zero unless this byte counts    */
 	.endm
 
-	.macro  TXSEG2			/* 11: commit the CRC, publish byte 0 */
+	.macro  TXSEG2			/* 7: commit the CRC                  */
 	movs    r2, #8			/* 1                                  */
 	ands    r2, r1			/* 1  shift by 8 only when committing */
 	mov     r1, r10			/* 1                                  */
@@ -235,23 +258,21 @@ usb_tx_\name:
 	eors    r1, r0			/* 1  ^ the gated table value         */
 	mov     r10, r1			/* 1  crc'                            */
 	mvns    r1, r1			/* 1  the wire form is the complement */
-	mov     r2, r8			/* 1                                  */
-	strb    r1, [r2, #0]		/* 2  CRC low byte into the stream    */
-	nop				/* 1                                  */
-	.endm
+	.endm				/*    r1 carries it into TXSEG3       */
 
-	.macro  TXSEG3			/* 11: publish byte 1, low nibble idx */
-	lsrs    r1, r1, #8		/* 1                                  */
+	.macro  TXSEG3			/* publish the CRC, low nibble index  */
 	mov     r2, r8			/* 1                                  */
-	strb    r1, [r2, #1]		/* 2  CRC high byte into the stream   */
+	strh    r1, [r2, #0]		/* A  BOTH CRC bytes in ONE store -    */
+					/*    the setup shifts the stream by  */
+					/*    one byte on odd lengths so this */
+					/*    address is always even          */
 	mov     r0, r12			/* 1  the byte                        */
-	movs    r1, #0x0F		/* 1                                  */
-	ands    r1, r0			/* 1  low nibble = first in time      */
-	lsls    r1, r1, #1		/* 1  halfword index                  */
+	lsls    r1, r0, #28		/* 1  \ (byte & 0x0F) * 2 in two,     */
+	lsrs    r1, r1, #27		/* 1  / not movs/ands/lsls in three   */
 	mov     r2, r11			/* 1  (state+1)<<5 selects the row    */
 	orrs    r1, r2			/* 1                                  */
 	adds    r1, #(T_TX - 32)	/* 1  r11 already carries 32 for row  */
-	.endm				/*    1; T_TX puts row 1 at 64        */
+	.endm				/*    1; = 7 + A                      */
 
 	.macro  TXSEG4			/* 11: low nibble -> bits, state, n   */
 	mov     r2, r14			/* 1                                  */
@@ -388,6 +409,12 @@ usb_send_data:
 1:
 	mov     r8, r2			/* park poly_function                */
 	ldr     r6, =usb_txbuf
+	movs    r4, #1
+	ands    r4, r1			/* length & 1: start the stream one  */
+	adds    r6, r6, r4		/* byte in on odd lengths, so that   */
+					/* the two CRC bytes always land on  */
+					/* an even address and TXSEG3 can    */
+					/* publish them with one STRH        */
 	movs    r4, #0x80		/* SYNC = 00000001, first bit first  */
 	strb    r4, [r6, #0]
 	strb    r3, [r6, #1]		/* the PID byte                      */
@@ -422,11 +449,24 @@ usb_send_data:
 	 * It is both the address the CRC bytes are published to and the
 	 * anchor the exhaustion test in TXSEG7 compares against. */
 	adds    r0, r6, r1		/* staging + length                  */
-	mov     r2, r8			/* poly_function                     */
-	cmp     r2, #0
+	/* The commit mask, built once, as a SHIFT REGISTER: bit k - the bit
+	 * the k-th TXSEG0 consumes - is 1 iff the byte that TXSEG0 fetches is
+	 * NOT a payload byte.  Bit 0 is the PID.  The old form recomputed a
+	 * two-sided window comparison every byte, eight cycles, in the one
+	 * segment that also pays for the RAM fetch.  On a CRC-less packet no
+	 * byte is committed at all, which is what the untaken branch leaves. */
+	movs    r2, #0
+	mvns    r2, r2			/* -1                                */
+	lsls    r2, r2, #1		/* ...1110                           */
+	mov     r5, r8			/* poly_function                     */
+	cmp     r5, #0
 	bne     2f
 	adds    r0, r0, #2		/* CRC present: two more slots       */
+	lsls    r2, r2, r1		/* and `length` payload bytes are    */
+					/* committed to it                   */
 2:
+	adds    r2, #1			/* bit 0: the PID, never committed   */
+	mov     r9, r2
 	mov     r8, r0
 
 	/* Zero the slot the pipeline over-fetches one byte past the end.
@@ -438,8 +478,6 @@ usb_send_data:
 	movs    r2, #0
 	strb    r2, [r0, #2]
 
-	adds    r0, r6, #3
-	mov     r9, r0			/* the low edge of the CRC window    */
 	adds    r3, r6, #1		/* source pointer: the PID is next   */
 	movs    r4, #0x80		/* the queue holds SYNC, n = 8       */
 	movs    r0, #0
@@ -492,28 +530,28 @@ usb_tx_chain:
 	TXUSE   0			/* 5 + 11 nop = 16                   */
 	TXCELL  cellS0
 	TXSEG0
-	TXUSE   11			/* 5 + 11     = 16                   */
-	TXCELL  cellS1
+	TXUSE   TXSEG0_CYC		/* 5 + the segment, TXCELL pads      */
+	TXCELL  cellS1			/* the rest to 16                    */
 	TXSEG1
-	TXUSE   11
+	TXUSE   TXSEG1_CYC
 	TXCELL  cellS2
 	TXSEG2
-	TXUSE   11
+	TXUSE   TXSEG2_CYC
 	TXCELL  cellS3
 	TXSEG3
-	TXUSE   11
+	TXUSE   TXSEG3_CYC
 	TXCELL  cellS4
 	TXSEG4
-	TXUSE   11
+	TXUSE   TXSEG4_CYC
 	TXCELL  cellS5
 	TXSEG5
-	TXUSE   11
+	TXUSE   TXSEG5_CYC
 	TXCELL  cellS6
 	TXSEG6
-	TXUSE   11
+	TXUSE   TXSEG6_CYC
 	TXCELL  cellS7
 	TXSEG7
-	TXUSE   11
+	TXUSE   TXSEG7_CYC
 	TXCELL_END
 
 /* ===================== the trailing stuffed zero, timed ==================

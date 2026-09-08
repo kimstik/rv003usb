@@ -138,21 +138,26 @@ class Chain:
 
     def run(self, pid, payload, want_crc):
         st = bytearray(16)
-        st[0] = 0x80
-        st[1] = pid
+        # the stream starts one byte in on odd lengths, so that the two CRC
+        # bytes land on an even address and TXSEG3 can publish them with one
+        # STRH.  The legacy engine had no such requirement and started at 0.
+        b0 = 0 if self.legacy else (len(payload) & 1)
+        st[b0 + 0] = 0x80
+        st[b0 + 1] = pid
         for i, b in enumerate(payload):
-            st[2 + i] = b
-        r8 = len(payload) + (2 if want_crc else 0)   # staging + total - 2
-        if not self.legacy:
-            st[r8 + 2] = 0            # the fix's one setup instruction
-        else:
-            st[r8 + 2] = 0            # legacy left it whatever it was; zero is
-                                      # the same buffer state, so the only
-                                      # difference measured is the dispatch
+            st[b0 + 2 + i] = b
+        r8 = b0 + len(payload) + (2 if want_crc else 0)   # staging + total - 2
+        assert self.legacy or r8 % 2 == 0, "the CRC halfword is not aligned"
+        st[r8 + 2] = 0                # the over-fetch slot
         r = [0] * 8
-        r[3] = 1
+        r[3] = b0 + 1
         r[4] = 0x80
-        r9, r10, r11, r12 = 3, 0xFFFF, (2 << 5), 0
+        if self.legacy:
+            r9 = b0 + 3               # the low edge of the CRC window
+        else:                         # the commit shift register
+            r9 = (((0xFFFFFFFE << len(payload)) & M32) if want_crc
+                  else 0xFFFFFFFE) + 1
+        r10, r11, r12 = 0xFFFF, (2 << 5), 0
         lvl = 0
         out = []
         cell = "usb_tx_cellS0"
@@ -181,9 +186,14 @@ class Chain:
                 k = int(cell[-1])
                 if k == 0:
                     r[0] = st[r[3]]; r[3] += 1
-                    r[1] = asr31((r[3] - r9) & M32)
-                    r2  = asr31((r8 - r[3]) & M32)
-                    r[1] = (~(r[1] | r2)) & M32
+                    if self.legacy:
+                        r[1] = asr31((r[3] - r9) & M32)
+                        r2  = asr31((r8 - r[3]) & M32)
+                        r[1] = (~(r[1] | r2)) & M32
+                    else:
+                        c = r9 & 1
+                        r9 >>= 1
+                        r[1] = 0 if c else M32     # sbcs r1, r1
                 elif k == 1:
                     r12 = r[0]
                     r2 = ((r10 ^ r[0]) & 0xFF) << 1
@@ -194,12 +204,17 @@ class Chain:
                     r[1] = (r10 >> r2) ^ r[0]
                     r10 = r[1] & M32
                     r[1] = (~r[1]) & M32
-                    st[r8] = r[1] & 0xFF
+                    if self.legacy:
+                        st[r8] = r[1] & 0xFF
                 elif k == 3:
-                    r[1] >>= 8
-                    st[r8 + 1] = r[1] & 0xFF
+                    if self.legacy:
+                        r[1] >>= 8
+                        st[r8 + 1] = r[1] & 0xFF
+                    else:
+                        st[r8] = r[1] & 0xFF          # strh, little-endian
+                        st[r8 + 1] = (r[1] >> 8) & 0xFF
                     r[0] = r12
-                    r[1] = ((r[0] & 0x0F) << 1) | r11
+                    r[1] = (((r[0] << 28) & M32) >> 27) | r11
                     r[1] += self.T_TX_BIAS
                 elif k == 4:
                     r[1] = self.h(r[1])

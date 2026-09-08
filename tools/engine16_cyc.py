@@ -52,7 +52,7 @@ def cost(mnem, ops, exec_from, ioport_regs=(), flash_regs=()):
         # operation in the bit cell.
         mo = re.search(r'\[(\w+)', ops)
         if mo:
-            base = mo.group(1).lower()
+            base = norm(mo.group(1))
             if base in ioport_regs:
                 return (1, 1)
             if base in flash_regs:
@@ -64,6 +64,57 @@ def cost(mnem, ops, exec_from, ioport_regs=(), flash_regs=()):
     if re.fullmatch(r'b(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)', m):
         return (1, 3)                      # 1 not taken, 2-3 taken
     return (1, 1)
+
+ALIAS = {'lr': 'r14', 'sp': 'r13', 'ip': 'r12', 'fp': 'r11',
+         'sl': 'r10', 'sb': 'r9', 'pc': 'r15'}
+
+def norm(r):
+    """objdump prints lr/ip/sl/fp/sb/sp/pc, not r14/r12/r10/r11/r9/r13/r15.
+    Comparing the printed name against a --flashdata/--ioport argument spelled
+    the other way silently matches nothing, and every lookup through that
+    register is then charged as a RAM access."""
+    r = r.lower()
+    return ALIAS.get(r, r)
+
+WRITES_NOTHING = {'cmp', 'cmn', 'tst', 'nop', 'push', 'b', 'bl', 'bx', 'blx',
+                  'bkpt', 'dmb', 'dsb', 'isb', 'svc', 'wfe', 'wfi', 'yield'}
+
+def propagate(mnem, ops, seeds_flash, seeds_ioport, flash_now, ioport_now):
+    """Track which registers currently HOLD a flash-table or GPIO base.
+
+    The encoding does not say what a base register points at, so the caller
+    names the registers that hold one - but an engine that keeps its table
+    base in a high register loads it into a low one before every lookup
+    (`mov r2, r14` / `ldrh r1, [r2, r1]`), and pricing only the named register
+    charges every one of those lookups as a RAM access.  On engine16_tx.S that
+    reported seven of ten bit cells two cycles over budget that are not.
+
+    So: `mov rD, rS` carries the attribute, and any other write to a register
+    takes it away.  Sets are re-seeded at each block, since the named
+    registers are pinned by the engines' register contracts.
+    """
+    m = mnem.lower()
+    if m.endswith('.n') or m.endswith('.w'):
+        m = m[:-2]
+    if m in WRITES_NOTHING or m.startswith('str') or m.startswith('stm') \
+       or re.fullmatch(r'b(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)', m):
+        return flash_now, ioport_now
+    if m == 'pop' or m.startswith('ldm'):
+        written = [norm(r) for r in re.findall(r'[a-z]+[0-9]*',
+                                               ops.split('{')[-1].split('}')[0])]
+        return (flash_now - set(written), ioport_now - set(written))
+    mo = re.match(r'\s*(\w+)', ops)
+    if not mo:
+        return flash_now, ioport_now
+    dst = norm(mo.group(1))
+    if m == 'mov':
+        src = re.findall(r'\w+', ops)
+        src = norm(src[1]) if len(src) > 1 else None
+        f = (flash_now | {dst}) if src in flash_now else (flash_now - {dst})
+        i = (ioport_now | {dst}) if src in ioport_now else (ioport_now - {dst})
+        return f, i
+    return (flash_now - {dst} | (seeds_flash & {dst}),
+            ioport_now - {dst} | (seeds_ioport & {dst}))
 
 def main():
     ap = argparse.ArgumentParser()
@@ -90,24 +141,31 @@ def main():
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         sys.exit(f'objdump failed: {e}')
 
-    flashregs = tuple(r.strip().lower() for r in a.flashdata.split(',') if r.strip())
-    ioport = tuple(r.strip().lower() for r in a.ioport.split(',') if r.strip())
+    flashregs = tuple(norm(r.strip()) for r in a.flashdata.split(',') if r.strip())
+    ioport = tuple(norm(r.strip()) for r in a.ioport.split(',') if r.strip())
 
     label_re = re.compile(r'^([0-9a-f]+) <([^>]+)>:')
     insn_re  = re.compile(r'^\s+([0-9a-f]+):\s+([0-9a-f ]+?)\s+(\S+)\s*(.*)$')
 
     blocks, cur = [], None
+    propagate.state = (set(flashregs), set(ioport))
     for line in dis.splitlines():
         mo = label_re.match(line)
         if mo:
             cur = {'label': mo.group(2), 'addr': mo.group(1), 'insns': []}
-            blocks.append(cur); continue
+            blocks.append(cur)
+            propagate.state = (set(flashregs), set(ioport))
+            continue
         mo = insn_re.match(line)
         if mo and cur is not None:
             addr, _, mnem, ops = mo.groups()
             ops = ops.split(';')[0].split('@')[0].strip()
             if mnem.startswith('.'): continue
-            cur['insns'].append((addr, mnem, ops, cost(mnem, ops, a.ex, ioport, flashregs)))
+            fl_now, ip_now = propagate.state
+            cur['insns'].append((addr, mnem, ops,
+                                 cost(mnem, ops, a.ex, ip_now, fl_now)))
+            propagate.state = propagate(mnem, ops, set(flashregs), set(ioport),
+                                        fl_now, ip_now)
 
     print(f'# cost model: code executing from {a.ex.upper()}  '
           f'(ENGINE16_SPEC.md §2, measured at LAT=0)')

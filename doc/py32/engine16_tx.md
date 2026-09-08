@@ -439,6 +439,78 @@ tx_base.S (before) 6030 cases, 63 mismatches - every one of them exactly the
 The second line is the one that matters: a model that reports 0 on the fixed
 engine proves nothing unless it reports the defect on the broken one.
 
+### 6.4 Sixteen cycles from flash, which this engine did not hold
+
+`FLASH_TIMING.md` left this outstanding and the file's own header recorded it:
+**the transmit chain overran its bit cell when the engine ran from flash**,
+which is the residency the integration build uses. The staging buffer is in
+RAM whatever the engine does, and a RAM access from flash-resident code is 4
+cycles, not 2.
+
+The first thing to fix was the measurement. `tools/engine16_cyc.py` compared
+`--flashdata r14` against what objdump actually prints, which is `lr`, so the
+match never happened and **every table lookup was charged as a RAM access** —
+seven cells reported over budget. It also priced only the named register,
+while an engine that keeps its table base high loads it into a low one before
+every lookup (`mov r2, r14` / `ldrh r1, [r2, r1]`). The tool now normalises
+`lr`/`ip`/`sl`/`fp`/`sb`/`sp`/`pc` and carries the attribute through `mov`,
+taking it away on any other write. On the receive engine this moves no timed
+cell and no turnaround figure; it does raise two untimed blocks (`rx_flush7`
+by 4, `usb_in_render` by 13 from flash), which were being undercharged for
+exactly the opposite reason — a register that had held the table base and then
+held a RAM pointer.
+
+With that fixed the real picture is **three** cells, not seven: `S0` (`ldrb`
+from the buffer), `S2` and `S3` (the two CRC `strb`). The flash column
+totalled 94 against 88 available, so there was nothing to redistribute — six
+cycles had to go.
+
+**`TXSEG0`, 8 cycles → 3.** The commit mask ("is the byte just fetched a
+payload byte") was a two-sided pointer comparison recomputed for every byte:
+two subtractions, two `asrs`, an `orrs` and an `mvns`. But the answer is the
+same every packet and known at setup, and it is one bit per byte. So it
+becomes a **shift register in `r9`** — the register that used to hold the
+window's low edge, so no new register is needed — built once as
+`(0xFFFFFFFE << length) + 1`, or `0xFFFFFFFF` on a CRC-less packet where
+nothing is committed at all:
+
+```
+  mov  r1, r9      lsrs r1, r1, #1      mov  r9, r1      sbcs r1, r1
+```
+
+`MOV` to a high register does not touch the carry, which is what lets the
+write-back sit between the shift that produces C and the `sbcs` that consumes
+it.
+
+**`TXSEG3`, one RAM access instead of two.** The two CRC bytes were published
+with two `strb`. One `strh` publishes both — if the address is even, which it
+is not for odd payload lengths. So the **setup starts the stream one byte into
+the buffer when the length is odd** (`movs r4,#1 / ands r4,r1 / adds r6,r6,r4`,
+untimed): `r8 = base + (len&1) + len + 2` is even either way, and the walk is
+at most 14 of the buffer's 16 bytes. The model asserts the alignment on every
+case rather than trusting the argument.
+
+The rest is bookkeeping: `TXSEG2` gives up its store and carries `~crc` in
+`r1` across the cell boundary, the nibble index goes from `movs/ands/lsls` to
+`lsls #28 / lsrs #27`, and each segment declares its own `TXSEG<n>_CYC` so
+`TXCELL` pads for the residency instead of assuming 11.
+
+**Result.** Flash column 94 → 81, RAM column 77, every segment ≤ 11:
+
+```
+  segment          0   1   2   3   4   5   6   7
+  flash-resident   9  11   7  11  11  11  11  11
+  RAM-resident     7  11   7   9  11  11  11  11
+```
+
+```
+USB_ENGINE16_FLASH=1, --exec flash   11 of 11 cells exactly 16
+USB_ENGINE16_FLASH=0, --exec ram     11 of 11 cells exactly 16
+engine16_tx_model.py                 6030 cases, 0 mismatches
+```
+
+4 bytes of flash. RAM unchanged.
+
 ## 7. Registers, footprint, and what this design gives up
 
 **Register allocation, honestly.** All fourteen usable registers are live in
