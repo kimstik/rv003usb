@@ -145,12 +145,15 @@ class Bus:
         b = self.t0 + n * self.period
         if not self.jitter:
             return b
-        if self._jit is None:
-            import random
-            r = random.Random(self.seed)
-            self._jit = [r.uniform(-self.jitter, self.jitter)
-                         for _ in range(len(self.levels) + 2)]
-        return b + self._jit[n] if 0 <= n < len(self._jit) else b
+        # WORST CASE, not a random draw.  A displacement common to every
+        # boundary is only a phase shift; what squeezes a cell is its start
+        # moving late while its end moves early, and since each boundary is
+        # shared between two cells the worst a transmitter can do to a receiver
+        # that samples every cell is the alternating pattern - which shrinks
+        # every other cell to period - 2*jitter.  Both parities are worth
+        # running (seed 0 and seed 1), because which cells get squeezed
+        # depends on where the lock landed.
+        return b + (self.jitter if (n + self.seed) % 2 else -self.jitter)
 
     def level_at(self, t):
         if t < self.t0:

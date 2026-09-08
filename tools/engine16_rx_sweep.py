@@ -26,6 +26,7 @@ import multiprocessing
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -282,11 +283,13 @@ def edge_ppm(bus, syms, entry, t0, dribble, sign, res=25, limit=40000,
 
 
 def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE,
-            jitter=0.0, seeds=3):
+            jitter=0.0, seeds=2):
     eng = os.path.join(workdir, "eng%s.S" % tag)
     with open(eng, "w") as f:
         f.write(src)
     elf, syms = build(eng, TX, workdir, tag=tag)
+    text = subprocess.run(["arm-none-eabi-size", elf], check=True,
+                          capture_output=True, text=True).stdout.split("\n")[1]
     bus = Bus(elf, syms, wire(PID, PAY), 0.0, float(CELL), dribble)
     bus.watch(syms["usb_pid_handle_data"])
     lo, hi = entry_window(bus, syms, dribble)
@@ -296,7 +299,7 @@ def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE,
     omin, omax, fails, hist = offsets(bus, syms, ents, phases, dribble,
                                       jitter, seeds)
     r = {"entry": (lo, hi), "omin": omin[0], "omax": omax[0],
-         "fails": fails, "hist": hist}
+         "fails": fails, "hist": hist, "text": int(text.split()[0])}
     if omin[1] is None:
         return r
     plus, minus = 10 ** 9, -10 ** 9
@@ -340,9 +343,10 @@ def fmt(key, r):
     if r.get("entry") is None:
         return "  %-8s K=%-3d P=%-2d  DOES NOT DECODE   %s" % (
             poll, k, p, r.get("err", ""))
-    return ("  %-8s K=%-3d P=%-2d  entry %2d..%-2d  offset %5.2f..%-5.2f "
+    return ("  %-8s K=%-3d P=%-2d  %5dB  entry %2d..%-2d  offset %5.2f..%-5.2f "
             "(width %4.2f)  tol %+.3f%% .. %+.3f%%  symmetric %.3f%%  %s"
-            % (poll, k, p, r["entry"][0], r["entry"][1], r["omin"], r["omax"],
+            % (poll, k, p, r["text"], r["entry"][0], r["entry"][1],
+               r["omin"], r["omax"],
                r["omax"] - r["omin"], r.get("minus", 0) / 1e4,
                r.get("plus", 0) / 1e4, r.get("sym", 0) / 1e4,
                "worst +@%s -@%s fails %d" % (r.get("worst", ("", ""))[0],

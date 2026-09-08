@@ -215,6 +215,11 @@
  * the masked index is 0..31, so the window is usb_rxbuf+2 .. usb_rxbuf+33
  * and the buffer is USB_RXBUF_LEN + 2 bytes.  No store can leave it for any
  * input whatever, which is the property the mask was chosen for. */
+/* The phase lock's two measured constants.  doc/py32/SAMPLE_POINT.md carries
+ * the sweep they came out of; tools/engine16_rx_sweep.py reproduces it. */
+#define USB_RX_LOCK_NOPS   16	/* .Lk_edge's delay run                */
+#define USB_RX_LOCK_DELAY  41	/* detecting sample -> first chain one */
+
 #define USB_RXBUF_LEN   32
 #define USB_RXBUF_MASK  27		/* shift pair: 32 - log2(len) */
 /* Loop/packet bound: the chain is a loop, so termination needs a runtime
@@ -913,16 +918,141 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
  * so the first SYNC edge is long gone by the time we run.  Lock to the LAST
  * SYNC edge instead, which is unambiguous: SYNC is K J K J K J K K, so every
  * K cell is followed by a J one bit later EXCEPT cell 6, which is followed
- * by another K.  Catch a J->K edge, wait into the middle of the next cell,
- * and if the bus is still K then that edge was cell 6.  (VUSB's mechanism.)
+ * by another K.  Catch a J->K edge, wait into the next cell, and if the bus
+ * is still K then that edge was cell 6.  (VUSB's mechanism.)
  *
- * Both poll loops are the tightest bounded form: the wait is the TAKEN
- * branch and the exit is a FALL-THROUGH, so the exit costs nothing and its
- * 2-vs-3 never lands in the phase.  Period 6..7 cycles (subs, untaken beq,
- * ldr, lsls, taken branch), so the edge is seen 0..7 cycles late, nominally
- * 3.5 +-3.5.  VUSB's loops cost 7..9 with a taken B on the way out, and its
- * delay was itself a loop, which multiplied the ambiguity again; here the
- * delay is straight-line nops. */
+ * WHERE THE SAMPLE LANDS.  The whole lock is a poll plus a constant, so the
+ * band of sample offsets the chain can end up with is exactly the POLL PERIOD
+ * of the J->K hunt, and its position in the cell is the constant.  Both are
+ * measured, not reasoned: tools/engine16_rx_sweep.py assembles candidates and
+ * runs them on a synthesized bus; doc/py32/SAMPLE_POINT.md is the table.
+ *
+ *   this lock          band 2.9 of 16 at offset 9.0..11.9   +-0.155%
+ *   one 7-cycle loop   band 6.9 of 16 at offset 9.0..15.9   +-0.007%
+ *
+ * (worst case over entry latency 7..37 x 8 sub-cycle packet phases, with
+ * USB 2.0 S7.1.9's 260 ns of EOP dribble and Table 7-5's +-25 ns of source
+ * jitter.  The old loop does not merely have a thin margin at that jitter -
+ * 40 of its 248 grid points do not decode at all.)
+ *
+ * Three things buy that, and none of them is a cleverer loop body:
+ *
+ *  1. THE HUNT IS UNROLLED AND THE EXIT IS THE TAKEN BRANCH.  A poll whose
+ *     "keep waiting" is the taken branch costs ldr + lsls + taken b<cond> =
+ *     7 with the counter, 5 without.  Turn it inside out - "found" is the
+ *     taken branch - and the not-found path is ldr + lsls + UNTAKEN b<cond>
+ *     = 3, which is the ARMv6-M floor: no load sets flags, so no sample can
+ *     cost fewer than three instructions.  Every exit branches to the SAME
+ *     .Lk_edge, so the delay from the sample that SAW the edge to the
+ *     confirming sample is one constant and the band is the poll period
+ *     alone.  (Padding each exit to equalize the delay from the START of the
+ *     block would be the opposite of what is wanted: the block start has no
+ *     relation to the edge, and equalizing to it spreads the lock over the
+ *     whole block.)
+ *
+ *  2. .Lwait_j FALLS STRAIGHT INTO .Lwait_k.  A subs/beq between them is a
+ *     two-cycle blind window between the last J seen and the first K looked
+ *     for, and it widens the band by exactly as much as it costs whatever
+ *     the poll period is.  .Lwait_j owns the timeout for both loops.
+ *
+ *  3. THE LOCK MOVED IN FRONT OF THE EOP STUBS, and the priming block with
+ *     it.  usb_rx_cell0's `beq rx_eop0` had 232 of a Thumb B<cond>'s 256
+ *     bytes spent, so only 24 bytes of growth fitted where the lock used to
+ *     sit and the assembler refused the unrolled hunt.  Moving the priming
+ *     out as well SHORTENS that branch by 44 bytes instead of lengthening
+ *     it, at the price of one BX into the chain - and r14 already holds
+ *     usb_rx_chain+1, because that is the chain's own back edge.
+ *
+ * .Lwait_k is straight-line and never loops during a packet: .Lwait_j has
+ * just seen a J, so the J->K edge is at most one cell away, and 6 samples
+ * three cycles apart from 3 cycles after that J cover 18 > 16 cycles of it.
+ * Five samples cover 15 and lose the packet - measured: the entry window
+ * collapses from 0..37 to 23..37.  The fall-through is the no-packet case. */
+	.macro  SAMPLEK
+	ldr     r0, [r7, #USB_IDR_OFS]	/* 1                                 */
+	lsls    r0, r0, #(31 - USB_DM_BIT) /* 1  D- into N                    */
+	bpl     .Lk_edge		/* 1 not taken, 3 taken: D- low = K  */
+	.endm
+
+.Lsync_hunt:
+.Lwait_j:				/* first get to a J cell             */
+	subs    r1, #1			/* 1                                 */
+	beq     .Lgiveup		/* 1                                 */
+	ldr     r0, [r7, #USB_IDR_OFS]	/* 1                                 */
+	lsls    r0, r0, #(31 - USB_DM_BIT) /* 1                               */
+	bpl     .Lwait_j		/* 3  D- low = K: keep waiting       */
+					/* falls through - see note 2 above  */
+.Lwait_k:				/* then catch the J->K edge          */
+	SAMPLEK				/* t_j + 3                           */
+	SAMPLEK				/* t_j + 6                           */
+	SAMPLEK				/* t_j + 9                           */
+	SAMPLEK				/* t_j + 12                          */
+	SAMPLEK				/* t_j + 15                          */
+	SAMPLEK				/* t_j + 18  >= one 16-cycle cell    */
+	b       .Lsync_hunt		/* nothing on the wire: re-arm, and
+					 * pay one decrement for the round   */
+/* The confirming sample, at a fixed delay after the sample that saw the edge:
+ * 5 cycles for the taken SAMPLEK, then this run of nops.  It lands at
+ * t0 + 21..24, i.e. inside SYNC cell 7 with 5 cycles of clearance from the
+ * cell 6/7 boundary below and 8 from the cell 7/8 one above - and there is no
+ * transition at the lower one anyway, since cells 6 and 7 are both K.  An
+ * ordinary K cell would have flipped to J by now, so D- HIGH here means the
+ * edge was not the last one. */
+.Lk_edge:
+	.rept   USB_RX_LOCK_NOPS
+	nop
+	.endr
+	ldr     r0, [r7, #USB_IDR_OFS]	/* 1                                 */
+	lsls    r0, r0, #(31 - USB_DM_BIT) /* 1                               */
+	bmi     .Lsync_hunt		/* 1  D- HIGH = J -> not the last    */
+
+/* Confirmed.  Prime the pipeline with the one wire byte we already know -
+ * SYNC itself.  SYNC decodes to 0,0,0,0,0,0,0,1 oldest-first, i.e. 0x80 as a
+ * USB byte, so it enters the chain as if cell 7 had just decoded it: high
+ * nibble 0, low nibble 0b0001 -> index 2.  Falls through from the confirm;
+ * leaves through the same BX the chain's own back edge uses. */
+.Lprime:
+	movs    r0, #0			/* 1  accumulator holds no bits      */
+	movs    r3, #1			/* 1  sentinel at bit 0              */
+	movs    r5, #1			/* 1  last SYNC sample was K: D+ = 1 */
+	movs    r1, #0			/* 1  SYNC high nibble               */
+	movs    r2, #4			/* 1  SYNC low nibble * 4            */
+	mov     r8, r2			/* 1                                 */
+	movs    r2, #0			/* 1                                 */
+	mov     r12, r2			/* 1  no bytes emitted yet           */
+	movs    r2, #(T_UT >> 8)	/* 1  \ unstuff state 0, biased with */
+	lsls    r2, r2, #8		/* 1   | T_UT: r11 IS the next index */
+	mov     r11, r2			/* 1  /  base, table offset included */
+	nop				/* 1  \  phase padding: 11 + 3 = 14  */
+	nop				/* 1   | cycles, and the assertion at */
+	nop				/* 1  /  usb_rx_chain enforces it     */
+.Lprime_end:
+	bx      r14			/* 3  into usb_rx_chain              */
+
+/* THE LEDGER FOR THE SAMPLE POINT, assembled rather than asserted in a
+ * comment.  Every instruction between .Lk_edge and .Lprime_end costs one
+ * cycle - the IDR read is an IOPORT access and everything else is a nop, a
+ * movs, a mov or an untaken branch - so that block's LENGTH IN HALFWORDS IS
+ * ITS LENGTH IN CYCLES, and the whole delay from the sample that detected
+ * the edge to the first sample of the chain is
+ *
+ *      5   the taken BPL out of SAMPLEK (lsls, then b<cond> taken)
+ *   + 33   .Lk_edge .. .Lprime_end
+ *   +  3   the BX above
+ *   = 41
+ *
+ * which, with a detection lag of 0..2.9 cycles, is the measured band of
+ * 9.0..11.9 of 16.  Change either number and this stops assembling. */
+	.if     (5 + (.Lprime_end - .Lk_edge) / 2 + 3) != USB_RX_LOCK_DELAY
+	.error  "engine16_merged: the lock delay is not USB_RX_LOCK_DELAY"
+	.endif
+	.if     (.Lwait_k - .Lsync_hunt) != 10
+	.error  "engine16_merged: something got between .Lwait_j and .Lwait_k"
+	.endif
+	.if     (.Lk_edge - .Lwait_k) != 6 * 6 + 2
+	.error  "engine16_merged: .Lwait_k is not 6 samples and the re-arm"
+	.endif
+
 /* EOP stubs for cells 0..3 sit in front of the chain so that a backward
  * B<cond> from an early cell reaches them; the chain is longer than the
  * +-254 byte range of a Thumb conditional branch (CLEANSHEET's finding about
@@ -996,81 +1126,9 @@ rx_eop\idx:
 	 * unconditional B. */
 	.ltorg
 
-.Lsync_hunt:
-.Lwait_j:				/* first get to a J cell             */
-	subs    r1, #1
-	beq     .Lgiveup
-	ldr     r0, [r7, #USB_IDR_OFS]
-	lsls    r0, r0, #(31 - USB_DM_BIT)
-	bpl     .Lwait_j		/* D- low = K: keep waiting          */
-.Lwait_k:				/* then catch the J->K edge          */
-	subs    r1, #1
-	beq     .Lgiveup
-	ldr     r0, [r7, #USB_IDR_OFS]
-	lsls    r0, r0, #(31 - USB_DM_BIT)
-	bmi     .Lwait_k		/* D- high = J: keep waiting         */
-	/* falls through: t0 = the start of this cell, nominally 3.5 cycles ago */
-
-/* 20 nops put the confirming sample at t0 + 23.5 nominal, i.e. the middle of
- * the NEXT cell.  SYNC cell 7 is K; an ordinary K cell would be J by now. */
-.Lk_edge:
-	.rept   20
-	nop
-	.endr
-	ldr     r0, [r7, #USB_IDR_OFS]	/* t0 + 23.5                         */
-	lsls    r0, r0, #(31 - USB_DM_BIT)
-	bmi     .Lsync_hunt		/* D- HIGH = J -> an ordinary K cell */
-					/* has already flipped, so that was  */
-					/* not the last edge.  This was BPL, */
-					/* which sent the CORRECT edge back  */
-					/* to the hunt: SYNC cell 7 is K and */
-					/* K is D- low.  The engine locked   */
-					/* four bit times late and decoded   */
-					/* nothing.  The comment was right   */
-					/* and the instruction was wrong;    */
-					/* tools/engine16_rx_bus.py is what  */
-					/* executed the lock and saw it.     */
-
-/* Confirmed.  The first PID cell starts at t0 + 32, so its centre is
- * t0 + 40 = confirming sample + 16.  ldr + lsls + untaken bpl = 3, so the
- * priming below is 14 cycles: 9 of setup, 5 of nop - which is what the code
- * does and what the assertion at usb_rx_chain enforces (F-9: this comment
- * used to say 13/4 and contradict both).  14 puts the first sample half a
- * cycle after the cell centre instead of half a cycle before; the poll
- * granularity already contributes +-3.5.
- *
- * The pipeline is primed with the one wire byte we already know - SYNC
- * itself.  SYNC decodes to 0,0,0,0,0,0,0,1 oldest-first, i.e. 0x80 as a USB
- * byte, so it enters the chain as if cell 7 had just decoded it: high
- * nibble 0, low nibble 0b0001 -> index 2. */
-	.balign 4			/* align HERE, not at the chain head,
-					 * so no variable-size fill can land
-					 * inside the counted priming block */
-.Lprime:
-	movs    r0, #0			/* 1  accumulator holds no bits      */
-	movs    r3, #1			/* 1  sentinel at bit 0              */
-	movs    r5, #1			/* 1  last SYNC sample was K: D+ = 1 */
-	movs    r1, #0			/* 1  SYNC high nibble               */
-	movs    r2, #4			/* 1  SYNC low nibble * 4            */
-	mov     r8, r2			/* 1                                 */
-	movs    r2, #0			/* 1                                 */
-	mov     r12, r2			/* 1  no bytes emitted yet           */
-	movs    r2, #(T_UT >> 8)	/* 1  \ unstuff state 0, biased with */
-	lsls    r2, r2, #8		/* 1   | T_UT: r11 IS the next index */
-	mov     r11, r2			/* 1  /  base, table offset included */
-	nop				/* 1  \  phase padding: 11 + 3 = 14  */
-	nop				/* 1   | cycles, and 14 halfwords is  */
-	nop				/* 1  /  4-aligned at usb_rx_chain    */
-	/* falls straight into usb_rx_cell0 - no branch, no ambiguity */
-
-/* ======================= the timed chain: 8 cells x 16 ===================
- * Cell 7 closes the wire byte, decodes it (SEGA) and takes the back edge.
- * Cells 0..6 carry the pipeline for the byte cell 7 decoded one iteration
- * ago.  The only branches in the chain are the eight SE0 tests, not taken
- * until the packet ends (1 cycle, no ambiguity), and the single back edge,
- * which is a BX: 3 cycles flat, not the 2-3 of a B. */
+	.balign 4
 usb_rx_chain:
-	.if     (usb_rx_chain - .Lprime) != 28	/* 14 insns x 2 bytes */
+	.if     (.Lprime_end - .Lprime) != 28	/* 14 insns x 2 bytes */
 	.error  "engine16_merged: phase-lock priming is not 14 cycles"
 	.endif
 	CELL    0
