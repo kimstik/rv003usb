@@ -57,6 +57,15 @@ CRC16 §8.3.5 from their generator polynomials, EOP §7.1.13.2, the enumeration
 sequence §9.1.2. The decoder that says what the device sent is a receiver
 written to the same clauses.
 
+**The reference codec is checked against the specification's own numbers**
+before anything runs, so that a mistake in the analyser cannot be reported as a
+device defect: CRC5 reproduces §8.3.5.1's worked example (address 0x15,
+endpoint 0x0E → 0x1D), CRC16 of an empty payload is 0x0000 (§8.3.5.2), and
+every PID byte matches Table 8-1. Beyond that, the strongest evidence that the
+codec is right is two-sided: the device — which computes CRC5 and CRC16 from
+its own tables, written independently — accepted every packet this host built
+and rejected the one whose CRC16 the host deliberately broke.
+
 **No verdict is read out of the device's RAM.** The emulator maps the GPIO as
 MMIO and records every `BSRR` and `MODER` write with a cycle stamp; the driven
 line is reconstructed from those writes and handed to the reference decoder.
@@ -272,7 +281,7 @@ bus held.
 ### 4.4 The device still answers the default address after SET_ADDRESS
 
 After `SET_ADDRESS(3)` completes, a SETUP addressed to **0** is still ACKed.
-The filter at `engine16_merged.S:1877` accepts address 0 unconditionally.
+The filter at `engine16_merged.S:1873` (`beq .Lt_addr_ok`) accepts address 0 unconditionally.
 §9.4.6 requires an addressed device to answer only its assigned address; on a
 bus where a second, unaddressed device is being enumerated, both answer the
 same token. Both RISC-V predecessors do the same thing, so this is inherited

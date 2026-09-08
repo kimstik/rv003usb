@@ -186,6 +186,32 @@ def handshake_packet(pidb):
     return packet_levels(pidb, [], False)
 
 
+def selfcheck():
+    """The reference codec against values the specification itself states, so
+    that a mistake here cannot pass as a device defect.
+
+      * USB 2.0 S8.3.5.1 works its CRC5 example for a token with address
+        0x15 and endpoint 0x0E and gets 0b01110 transmitted, i.e. 0x1D.
+      * S8.3.5.2: a zero-length data packet's CRC16 is 0x0000.
+      * S8.3.1 Table 8-1 fixes every PID byte.
+    """
+    assert crc5(0x15 | (0x0E << 7)) == 0x1D, "CRC5 fails the S8.3.5.1 example"
+    assert crc16(b"") == 0x0000, "CRC16 of an empty payload is not 0x0000"
+    assert crc5(0) == 0x02, "CRC5 of the all-zero token field is not 0x02"
+    for name, want in (("OUT", 0xE1), ("IN", 0x69), ("SOF", 0xA5),
+                       ("SETUP", 0x2D), ("DATA0", 0xC3), ("DATA1", 0x4B),
+                       ("ACK", 0xD2), ("NAK", 0x5A), ("STALL", 0x1E)):
+        got = globals()["PID_" + name]
+        assert got == want, "PID %s is %02X, Table 8-1 says %02X" % (
+            name, got, want)
+    # and the encoder against the decoder, over a packet with a forced
+    # stuffing insertion
+    p = decode(data_packet(PID_DATA0, b"\xff" * 8))
+    assert p["pid"] == PID_DATA0 and p["payload"] == b"\xff" * 8 \
+        and p["crc_ok"] and p["stuff_error"] is None, "codec round trip"
+    return True
+
+
 class DecodeError(Exception):
     pass
 
@@ -1504,6 +1530,10 @@ def main():
     ap.add_argument("--keep", default=None, help="keep the build here")
     a = ap.parse_args()
 
+    selfcheck()
+    print("reference codec: CRC5 matches S8.3.5.1's worked example (addr "
+          "0x15, endp 0x0E -> 0x1D),\n  CRC16 of an empty payload is 0x0000, "
+          "every PID byte matches Table 8-1")
     wd = a.keep or tempfile.mkdtemp(prefix="usbenum.")
     elf, syms = build(wd)
     print("linked %s" % elf)
