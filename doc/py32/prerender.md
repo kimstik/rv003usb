@@ -210,21 +210,46 @@ strictly ascending, that every key is the address of the chunk it names, and
 that every record's `len`, `pid`, `groups`, `t` and stream bytes match. On the
 gamepad demo it reports `verified 27 records`.
 
-The build is therefore:
+The build is therefore two passes, and it is **`tools/prerender_build.sh`**,
+not a procedure to remember:
 
 ```
-  make                                       # pass 1
-  tools/prerender_gen.py FW.elf -o usb_prerender.inc
-  make                                       # pass 2
-  tools/prerender_gen.py FW.elf --verify     # or the table is stale
+  tools/prerender_build.sh demo_gamepad MCU_TYPE=PY32F003x4
 ```
 
-with one line of integration: `#include "usb_prerender.inc"` inside
-`usb_config.h`'s `INSTANCE_DESCRIPTORS` block, which is the only place the
-descriptor symbols are in scope. That is the same shape of integration step as
-`INTEGRATION_BUILD.md`'s one line of vector wiring, and like that one it must
-actually be done — a build without it links the weak symbols at zero and
-quietly renders everything at run time.
+It refuses to start if `usb_config.h` does not contain
+`#include "usb_prerender.inc"` — the one line of integration, which has to be
+inside the `INSTANCE_DESCRIPTORS` block because that is the only place the
+descriptor symbols are in scope. It seeds an empty table so pass 1 links,
+generates from pass 1's image, rebuilds, and **runs `--verify` as the last
+step of the build**, so a stale or unlinked table is a build failure rather
+than a silent loss of the cycles this exists to save. Both failure modes were
+tested rather than asserted:
+
+```
+  no #include            prerender_build: usb_config.h does not include
+                         usb_prerender.inc  ...                    exit 1
+  #include, no table     prerender_gen: usb_pr_count is not in
+                         Build/demo_gamepad.elf - the generated table
+                         was not linked in                          exit 1
+  correct build          prerender_gen: verified 27 records         exit 0
+```
+
+Run end to end from a clean tree on `demo_gamepad`, `PY32F003x4`: 27 records,
+`usb_pr_keys` / `usb_pr_recs` / `usb_pr_count` linked in flash at
+`0x08001f98` / `0x08001ec0` / `0x08001ebc` — not the weak zero — and RAM
+416 B, FLASH 8636 B. Removing only the `#include` gives 8072 B, so **the table
+itself is 564 B** on this descriptor set with the current engines. (§7.2's
+668 B is a different number: the whole feature, lookup code included, at the
+commit that introduced it.)
+
+One thing this section previously described but the branch could not do:
+`tools/prerender.py`, the renderer both `prerender_gen.py` and
+`prerender_check.py` import, **was never committed**. Every command above
+failed with `ModuleNotFoundError` on a fresh checkout. It is committed now.
+The lesson is the one this project keeps re-learning in a new costume: a
+procedure that has only ever been described is not a procedure that works, and
+running it once from a clean tree is what tells the difference.
 
 `prerender_check.py` needs the `unicorn` python package (`pip install
 unicorn`) and `arm-none-eabi-gcc`. Both are build-time only; nothing here is
