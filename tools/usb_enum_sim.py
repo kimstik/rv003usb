@@ -555,6 +555,7 @@ class Response:
         self.drive_from = None      # cycle the pins became outputs
         self.drive_to = None        # cycle they were released
         self.host_eop = None        # cycle the host's EOP SE0 began
+        self.path = None            # which flush chain the EOP stub chose
 
 
 class Host:
@@ -565,10 +566,15 @@ class Host:
         self.trace = trace
         self.log = []
         self.eopstub = {}
+        self.flushes = {}
         for k in range(8):
             a = m.syms.get("rx_eop%d" % k)
             if a is not None:
                 self.eopstub[a & ~1] = k
+            for pre in ("rx_flush", "tb_flush", "ti_flush"):
+                a = m.syms.get("%s%d" % (pre, k))
+                if a is not None:
+                    self.flushes[a & ~1] = "%s%d" % (pre, k)
 
     def send(self, levels, label):
         """Put one packet on the wire and run the receive ISR over it."""
@@ -593,9 +599,20 @@ class Host:
             if lv == SE0:
                 r.tau = c
                 break
+        # The flush chains are fall-through cascades - entering at tb_flush1
+        # runs 1,2,3,4,5,6 - so the ENTRY is the lowest address hit inside
+        # one family, and that is the one the EOP stub chose.
+        hit = {}
         for a in m.pc_trace:
             if a in self.eopstub:
                 r.K = self.eopstub[a]
+            nm = self.flushes.get(a)
+            if nm:
+                fam = nm.rstrip("01234567")
+                if fam not in hit or a < hit[fam][0]:
+                    hit[fam] = (a, nm)
+        if hit:
+            r.path = "/".join(v[1] for v in hit.values())
         # what the device drove
         ev = m.dev[mark:]
         drives = [e for e in ev if e[1]]
@@ -716,6 +733,10 @@ class Enum:
         self.h = host
         self.problems = []
         self.turnarounds = []       # (label, K, tau_delta, kind)
+        self.paths = {}
+        self.verified_bytes = 0
+        self.verified_transfers = 0
+        self.stale = []
         self.notes = []
         self.retries = 0
 
@@ -725,6 +746,7 @@ class Enum:
     def record(self, label, r, kind):
         if r.tau is not None and r.first_edge is not None:
             self.turnarounds.append((label, r.K, r.first_edge - r.tau, kind))
+            self.paths.setdefault((kind, r.K), set()).add(r.path)
         if r.drove:
             if not r.released:
                 self.bad(label, "device left its pins driving after the "
@@ -901,6 +923,9 @@ class Enum:
         self.h.token(PID_OUT, addr, 0, label + " status OUT")
         r = self.h.data(PID_DATA1, b"", label + " status DATA1()")
         self.expect_handshake(label + " status ACK", r, PID_ACK)
+        if expect is not None and got[:len(expect)] == expect:
+            self.verified_bytes += len(expect)
+            self.verified_transfers += 1
         if expect is not None and got[:len(expect)] != expect:
             self.bad(label, "descriptor bytes differ from the linked image",
                      "wire %s\n%svs   %s" % (got.hex(), " " * 39,
@@ -1025,7 +1050,14 @@ def enumerate_device(h, elf, syms, e):
                       "sends 3" % len(pay))
         e.notes.append("endpoint 1 delivered: " +
                        " ".join(x[1].hex() for x in seen) +
-                       "  (the demo increments byte 0 once per render)")
+                       ".  The demo's handler increments byte 0 once per "
+                       "call and the delivered values step by TWO, so the "
+                       "handler runs twice per delivered report - once from "
+                       "the IN token's dispatch and once from .Lin_refresh "
+                       "after the host's ACK.  design_b_in.md S9 predicts "
+                       "this; here is the wire evidence.  A handler backed "
+                       "by a queue rather than a counter would drop every "
+                       "other entry.")
     return tbl
 
 
@@ -1195,9 +1227,86 @@ def timing_sweep(elf, syms, latency, per_k=4):
                 continue
             if r.pkt is None or r.pkt.get("pid") != PID_ACK:
                 continue
-            got.setdefault(r.K, []).append(r.first_edge - r.tau)
-    return ({k: (min(v), max(v), len(v)) for k, v in got.items()},
+            got.setdefault(r.K, []).append((r.first_edge - r.tau, r.path))
+    return ({k: (min(x[0] for x in v), max(x[0] for x in v), len(v),
+                 "/".join(sorted({x[1] or "?" for x in v})))
+             for k, v in got.items()},
             {k: len(v) for k, v in want.items()})
+
+
+def token_stuff_count(pidb, addr, endp):
+    v = (addr & 0x7F) | ((endp & 0xF) << 7)
+    c = crc5(v)
+    bits = []
+    for b in [pidb, v & 0xFF, ((v >> 8) & 0x07) | (c << 3)]:
+        bits += lsb_bits(b)
+    return len(stuff(bits)) - len(bits)
+
+
+def timing_sweep_in(elf, syms, latency, endpoints=2):
+    """The IN->DATA turnaround at every K a token can produce.
+
+    A token is three bytes after SYNC, so at most four zeros can be stuffed
+    into it and K is bounded by that; the enumeration itself only ever
+    produces K = 0.  The address is what moves it, so this assigns the
+    address that gives each K and then sends the token twice - the first
+    teaches the arm record the pattern (design_b_in.md S6), the second is
+    the one measured."""
+    want = {}
+    for a in range(0, 128):
+        for ep in range(endpoints):
+            k = token_stuff_count(PID_IN, a, ep) & 7
+            want.setdefault(k, (a, ep))
+    want.pop(0, None) if False else None
+    reach_any = sorted({token_stuff_count(PID_IN, a, ep) & 7
+                        for a in range(128) for ep in range(16)})
+    got = {}
+    for k in sorted(want):
+        a, ep = want[k]
+        m = Machine(elf, syms)
+        h = Host(m, latency=latency)
+        # SET_ADDRESS(a), including its status stage, so the address filter
+        # in .Ltoken lets the token through
+        h.token(PID_SETUP, 0, 0)
+        h.data(PID_DATA0, setup_packet(0x00, 5, a, 0, 0))
+        h.token(PID_IN, 0, 0)
+        h.token(PID_IN, 0, 0)
+        h.handshake(PID_ACK)
+        r = None
+        for _ in range(3):
+            r = h.token(PID_IN, a, ep)
+            if r.pkt and r.pkt.get("type") == "data":
+                break
+        if r and r.pkt and r.pkt.get("type") == "data" \
+           and r.tau is not None and r.first_edge is not None:
+            got[r.K] = (r.first_edge - r.tau, a, ep, r.path)
+    return got, reach_any
+
+
+def probe_stale_pid(elf, syms, latency, e):
+    """WHY the host's ACK draws a response.  A handshake is SYNC + PID + EOP:
+    the receive pipeline commits wire byte N during byte N+1's cells, and a
+    handshake has no byte N+1, so at the EOP stub usb_rxbuf+3 still holds the
+    PREVIOUS packet's PID.  EOPSTUB's `ldrb r2,[r9,#1]` reads it.  Four
+    predecessors, same trailing ACK, and the buffer byte printed alongside -
+    if the byte and the path taken track each other, the mechanism is not a
+    guess."""
+    rows = []
+    cases = (("IN token", lambda h: h.token(PID_IN, 0, 0)),
+             ("SETUP token", lambda h: h.token(PID_SETUP, 0, 0)),
+             ("DATA0", lambda h: (h.token(PID_SETUP, 0, 0),
+                                  h.data(PID_DATA0, b"\x80\x06\x00\x01"
+                                                    b"\x00\x00\x08\x00"))),
+             ("ACK", lambda h: (h.token(PID_IN, 0, 0), h.handshake(PID_ACK))))
+    for name, pre in cases:
+        m = Machine(elf, syms)
+        h = Host(m, latency=latency)
+        pre(h)
+        stale = bytes(m.uc.mem_read(syms["usb_rxbuf"] + 3, 1))[0]
+        r = h.handshake(PID_ACK)
+        rows.append((name, stale, r.drove, r.path))
+    e.stale = rows
+    return rows
 
 
 def probe_address_timing(elf, syms, latency, e):
@@ -1242,7 +1351,7 @@ def probe_address_timing(elf, syms, latency, e):
                        "status stage drew no response")
 
 
-def report(e, h, ksweep=None, kwant=None):
+def report(e, h, ksweep=None, kwant=None, insweep=None):
     print("\n" + "=" * 74)
     print("TURNAROUND, MEASURED")
     print("  cycles from tau - the SE0-detecting IDR read, turnaround.md S2's")
@@ -1273,16 +1382,17 @@ def report(e, h, ksweep=None, kwant=None):
         print("\n  DATA->ACK at every K, forced by choosing payloads whose bit")
         print("  stuffing moves the wire-byte boundary (a real enumeration")
         print("  only ever produces two of the eight):")
-        print("    %3s %9s %9s %5s   %-12s %s"
-              % ("K", "min", "max", "n", "S7 predicts", "F.6 predicts"))
+        print("    %3s %9s %9s %5s   %-12s %-12s %s"
+              % ("K", "min", "max", "n", "S7 predicts", "F.6 predicts",
+                 "flush"))
         pred7 = {1: 111, 2: 100, 3: 91, 4: 81, 5: 71, 6: 60, 7: 63, 0: 103}
         pred6 = {1: 108, 2: 97, 3: 88, 0: 95}
         for K in sorted(ksweep):
-            lo, hi, n = ksweep[K]
-            print("    %3d %9s %9s %5d   %-12s %s"
+            lo, hi, n, path = ksweep[K]
+            print("    %3d %9s %9s %5d   %-12s %-12s %s"
                   % (K, "tau+%d" % lo, "tau+%d" % hi, n,
                      "tau+%d" % pred7[K] if K in pred7 else "-",
-                     "tau+%d" % pred6[K] if K in pred6 else "-"))
+                     "tau+%d" % pred6[K] if K in pred6 else "-", path))
         allv = [v for K in ksweep for v in ksweep[K][:2]]
         print("    worst over every K: tau+%d  (deadline tau+%d), best "
               "tau+%d (floor tau+%d)"
@@ -1293,6 +1403,58 @@ def report(e, h, ksweep=None, kwant=None):
                   % (", ".join(str(k) for k in missing),
                      kwant and ", ".join("K%d:%d" % (k, kwant[k])
                                          for k in missing)))
+
+    if insweep:
+        print("\n  IN->DATA at every K a token can reach (the address is what")
+        print("  moves the wire byte boundary in a three-byte token):")
+        print("    %3s %9s   %-14s %s" % ("K", "measured", "S7 predicts",
+                                          "token"))
+        pin = {0: 103, 1: 111, 2: 100, 3: 91, 4: 81, 5: 71, 6: 60, 7: 63}
+        insweep, reach_any = insweep
+        for K in sorted(insweep):
+            d, a, ep, path = insweep[K]
+            print("    %3d %9s   %-14s addr %-3d endp %d   %s"
+                  % (K, "tau+%d" % d, "tau+%d" % pin[K], a, ep, path))
+        print("    A token is 24 bits after SYNC, so its stuff count is small:")
+        print("    over all 128 addresses x 16 endpoints K reaches only %s,"
+              % ", ".join(str(k) for k in reach_any))
+        print("    and endpoints >= ENDPOINTS are rejected by the bound, so a")
+        print("    token this build ANSWERS reaches only %s.  ti_flush2..7 are"
+              % ", ".join(str(k) for k in sorted(insweep)))
+        print("    unreachable on the answering path - they can run only on the")
+        print("    abort path, and there the timing does not matter.")
+        vals = [v[0] for v in insweep.values()]
+        print("    worst tau+%d, best tau+%d  (window [tau+%d, tau+%d])"
+              % (max(vals), min(vals), FLOOR, DEADLINE))
+
+    pids = {}
+    for _, r in h.log:
+        if r.drove and r.pkt and r.pkt.get("pid_ok"):
+            pids[r.pkt["pid"]] = pids.get(r.pkt["pid"], 0) + 1
+    print("\n  PIDs the device ever put on the wire: %s"
+          % ", ".join("%s x%d" % (PID_NAME.get(k, "%02X" % k), v)
+                      for k, v in sorted(pids.items())))
+    missing = [nm for nm, pid in (("NAK", PID_NAK), ("STALL", PID_STALL))
+               if pid not in pids]
+    if missing:
+        e.notes.append("the device never emitted %s, and the stack has no "
+                       "path that does: usb_send_empty answers an endpoint "
+                       "with nothing to send by sending a ZERO-LENGTH DATA "
+                       "packet, which a host reads as a completed short "
+                       "transfer rather than as 'not ready' (S8.4.6) or "
+                       "'request error' (S9.4.3)." % " or ".join(missing))
+
+    if e.stale:
+        print("\n  WHY a handshake is answered at all: what usb_rxbuf+3 - the")
+        print("  byte EOPSTUB's `ldrb r2,[r9,#1]` reads - holds when a host")
+        print("  ACK's EOP arrives, against the packet BEFORE that ACK:")
+        print("    %-12s %-14s %-8s %s"
+              % ("predecessor", "rxbuf+3 is", "drives?", "flush chain"))
+        for name, stale, drove, path in e.stale:
+            print("    %-12s %-14s %-8s %s"
+                  % (name, "0x%02X (%s)" % (stale,
+                                            PID_NAME.get(stale, "?")),
+                     "YES" if drove else "no", path or "-"))
 
     print("\n" + "=" * 74)
     print("WHAT THE RUN FOUND")
@@ -1305,7 +1467,10 @@ def report(e, h, ksweep=None, kwant=None):
         print("\nOBSERVED, NOT A DEFECT")
         for n in e.notes:
             print("  - " + _wrap(n))
-    print("\n  packets sent by the host      %d" % len(h.log))
+    print("\n  descriptor bytes verified byte-for-byte against the linked "
+          "image: %d\n  over %d control reads"
+          % (e.verified_bytes, e.verified_transfers))
+    print("  packets sent by the host      %d" % len(h.log))
     print("  responses the device drove    %d"
           % sum(1 for _, r in h.log if r.drove))
     print("  host retries forced           %d" % e.retries)
@@ -1356,7 +1521,7 @@ def main():
     if a.sweep_latency:
         import io
         import contextlib
-        for lat in range(6, 49, 2):
+        for lat in range(4, 57):
             m = Machine(elf, syms)
             h = Host(m, latency=lat)
             e = Enum(h)
@@ -1368,8 +1533,11 @@ def main():
                 bad = len(e.problems)
             except Exception as ex:
                 bad = "crashed: %s" % ex
-            print("  entry latency %2d cycles: %s problems, %d retries"
-                  % (lat, bad, e.retries))
+            ok = sum(1 for _, r in h.log
+                     if r.drove and r.pkt and r.pkt.get("pid_ok"))
+            print("  entry latency %2d cycles: %-12s problems, %2d retries, "
+                  "%3d well-formed responses, %d descriptor bytes verified"
+                  % (lat, bad, e.retries, ok, e.verified_bytes))
         return 0
 
     m = Machine(elf, syms)
@@ -1382,13 +1550,15 @@ def main():
     ep1_calls = dict(m.calls)
     probes(h, elf, syms, e, tbl)
     probe_address_timing(elf, syms, a.latency, e)
+    probe_stale_pid(elf, syms, a.latency, e)
     e.notes.append("C entry points executed during the enumeration: " +
                    ", ".join("%s x%d" % (k, v)
                              for k, v in sorted(ep1_calls.items())))
-    ks = kw = None
+    ks = kw = ins = None
     if not a.no_ksweep:
         ks, kw = timing_sweep(elf, syms, a.latency)
-    return report(e, h, ks, kw)
+        ins = timing_sweep_in(elf, syms, a.latency)
+    return report(e, h, ks, kw, ins)
 
 
 if __name__ == "__main__":
