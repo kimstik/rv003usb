@@ -1019,7 +1019,17 @@ rx_eop\idx:
 	.endr
 	ldr     r0, [r7, #USB_IDR_OFS]	/* t0 + 23.5                         */
 	lsls    r0, r0, #(31 - USB_DM_BIT)
-	bpl     .Lsync_hunt		/* J -> that was not the last edge   */
+	bmi     .Lsync_hunt		/* D- HIGH = J -> an ordinary K cell */
+					/* has already flipped, so that was  */
+					/* not the last edge.  This was BPL, */
+					/* which sent the CORRECT edge back  */
+					/* to the hunt: SYNC cell 7 is K and */
+					/* K is D- low.  The engine locked   */
+					/* four bit times late and decoded   */
+					/* nothing.  The comment was right   */
+					/* and the instruction was wrong;    */
+					/* tools/engine16_rx_bus.py is what  */
+					/* executed the lock and saw it.     */
 
 /* Confirmed.  The first PID cell starts at t0 + 32, so its centre is
  * t0 + 40 = confirming sample + 16.  ldr + lsls + untaken bpl = 3, so the
