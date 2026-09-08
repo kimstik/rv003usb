@@ -897,7 +897,18 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
 	movs    r2, #0
 	mov     r10, r2			/* parity accumulator init           */
 #endif
-	movs    r1, #200		/* bounded spin (PRIOR_ART A-16)     */
+	movs    r1, #64			/* bounded spin (PRIOR_ART A-16).
+					 * One decrement now covers a whole
+					 * round - .Lwait_j's poll plus, if it
+					 * saw a J, .Lwait_k's six samples and
+					 * the re-arm - which is 28 cycles on an
+					 * idle J bus against the old loop's 7.
+					 * 200 rounds would be 5600 cycles of
+					 * ISR on a glitch, four times what the
+					 * old count bought; 64 holds the worst
+					 * case at 1792, and a real packet needs
+					 * at most ~16 (four rejected SYNC edges,
+					 * three polls each).                 */
 	b       .Lsync_hunt
 .Lgiveup:				/* in range of the hunt's B<cond>    */
 	ldr     r0, =(.Lusb_done + 1)	/* B no longer reaches: the Design B  */

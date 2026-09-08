@@ -249,6 +249,18 @@ def one(elf, syms, pid, payload, entry, t0=0.0, ppm=0.0, dribble=0.0):
     return b, err, lv
 
 
+def accepted(b, syms, pay):
+    """The engine ACCEPTED the packet: it reached the C dispatch, past the
+    CRC16 residue test, with the right length (F-4: r3 = payload + 3).  The
+    receive buffer is written as the packet arrives and the residue is only
+    tested afterwards, so a frame that gained or lost a bit still leaves the
+    right bytes in RAM - comparing the buffer alone calls that a decode."""
+    want = bytes([0x80, 0xC3]) + pay
+    got = bytes(b.uc.mem_read(syms["usb_rxbuf"] + 2, len(want)))
+    return (got == want and len(b.calls) == 1
+            and b.calls[0][4] == len(pay) + 3)
+
+
 def sweep_offset(elf, syms, entries, phases):
     """The F5/G7 number: where the locked sample sits in the 16-cycle cell,
     over every entry latency and sub-cycle packet phase the lock can see."""
@@ -259,9 +271,9 @@ def sweep_offset(elf, syms, entries, phases):
             t0 = k / float(phases)
             lv = wire(0xC3, pay)
             b = Bus(elf, syms, lv, t0, float(CELL))
+            b.watch(syms["usb_pid_handle_data"])
             b.run(entry)
-            buf = bytes(b.uc.mem_read(syms["usb_rxbuf"] + 2, 10))
-            if not (buf[0] == 0x80 and buf[1] == 0xC3 and buf[2:] == pay):
+            if not accepted(b, syms, pay):
                 fails += 1
                 continue
             for _t, i, o in b.samples:
@@ -270,7 +282,7 @@ def sweep_offset(elf, syms, entries, phases):
     return hist, fails
 
 
-def sweep_ppm(elf, syms, entry, lo, hi, step):
+def sweep_ppm(elf, syms, entry, lo, hi, step, dribble=0.0):
     """How far the device clock may sit from nominal and still decode the
     longest packet.  `period` is DEVICE CYCLES PER HOST BIT, so a larger
     period means more device cycles fit in one bit: positive ppm = the device
@@ -284,10 +296,10 @@ def sweep_ppm(elf, syms, entry, lo, hi, step):
     v = lo
     while v <= hi:
         lv = wire(0xC3, pay)
-        b = Bus(elf, syms, lv, 0.0, CELL * (1.0 + v / 1e6))
+        b = Bus(elf, syms, lv, 0.0, CELL * (1.0 + v / 1e6), dribble)
+        b.watch(syms["usb_pid_handle_data"])
         b.run(entry)
-        buf = bytes(b.uc.mem_read(syms["usb_rxbuf"] + 2, 10))
-        ok.append((v, buf[0] == 0x80 and buf[1] == 0xC3 and buf[2:] == pay))
+        ok.append((v, accepted(b, syms, pay)))
         v += step
     return ok
 
@@ -324,9 +336,9 @@ def main():
     for entry in range(4, 80):
         lv = wire(0xC3, bytes(range(1, 9)))
         b = Bus(elf, syms, lv, 0.0, float(CELL))
+        b.watch(syms["usb_pid_handle_data"])
         b.run(entry)
-        buf = bytes(b.uc.mem_read(syms["usb_rxbuf"] + 2, 10))
-        good = buf[0] == 0x80 and buf[1] == 0xC3 and buf[2:] == bytes(range(1, 9))
+        good = accepted(b, syms, bytes(range(1, 9)))
         if good and lo is None:
             lo = entry
         if good:
@@ -341,15 +353,19 @@ def main():
           "latencies x 8 sub-cycle phases:" % (hi - lo + 1))
     for o in sorted(hist):
         print("      offset %5.1f of 16   %6.2f%%" % (o, 100.0 * hist[o] / tot))
-    print("      min %.1f  max %.1f   (dribble floor is 7: USB 2.0 S7.1.9's "
-          "260 ns = 6.24 cycles at 24 MHz)" % (min(hist), max(hist)))
+    print("      min %.1f  max %.1f   (the floor is USB 2.0 S7.1.9's 260 ns "
+          "of EOP dribble = 6.24 cycles at 24 MHz; the ceiling is 16.  "
+          "doc/py32/SAMPLE_POINT.md has the sweep)" % (min(hist), max(hist)))
 
     # 3. clock tolerance over the longest packet
     for entry in (16,):
-        res = sweep_ppm(elf, syms, entry, -40000, 40000, 1000)
+        res = sweep_ppm(elf, syms, entry, -40000, 40000, 1000, dribble=6.24)
         good = [v for v, k in res if k]
-        print("clock error that still decodes an 8-byte DATA0: "
-              "%+.2f%% .. %+.2f%%" % (min(good) / 1e4, max(good) / 1e4))
+        print("clock error that still decodes an 8-byte DATA0 from entry %d: "
+              "%+.2f%% .. %+.2f%%   (+ppm = FAST device clock.  This is ONE "
+              "point of the distribution above; the guaranteed number is the "
+              "worst over all of it - tools/engine16_rx_sweep.py)"
+              % (entry, min(good) / 1e4, max(good) / 1e4))
     return 0
 
 
