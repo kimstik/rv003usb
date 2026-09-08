@@ -522,7 +522,7 @@ def main():
                     bits.append((b[i >> 3] >> (i & 7)) & 1)
                 if bits[-1] == 0 and len(bits) >= 7 and all(bits[-7:-1]):
                     short += 1
-        print("packets ending in a stuffed zero (engine16_tx.S omits it): "
+        print("packets ending in a stuffed zero (both renderers now emit it): "
               "%d of %d = %.2f%%" % (short, len(cases), 100.0 * short / len(cases)))
         print("phase 1 PASS: every generated record is byte-identical to the "
               "one the assembled usb_in_render produces")

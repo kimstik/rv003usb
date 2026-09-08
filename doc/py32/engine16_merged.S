@@ -2836,7 +2836,10 @@ usb_in_render:
 	bne     .Lir_run
 	movs    r5, #(3 << 5)		/* state 2, biased: DATA0            */
 .Lir_run:
-	ldr     r6, =usb_tx_tables	/* T_TX's base                       */
+	ldr     r6, =usb_tx_trows_base	/* T_TX's base, exported by          */
+					/* engine16_tx.S: row (state+1) is   */
+					/* at +32*(state+1) from here, and   */
+					/* the linker keeps the two in step  */
 	movs    r3, #1			/* accumulator: the sentinel at bit 0*/
 	movs    r4, #0			/* f, the bits under it              */
 	movs    r0, #0			/* source byte index                 */
@@ -2934,8 +2937,8 @@ usb_ti_tails:
  * single block that both engines index off their own base:
  *
  *   usb_tables + 0     T_UT        256 B   receive: unstuff + accumulate
- *   usb_tables + 256   usb_tx_tables       transmit: dispatch + T_TX
- *   usb_tables + 512   T_CRC16     512 B   SHARED, and +256 from usb_tx_tables
+ *   usb_tables + 288   usb_tx_tables       transmit: T_EXH, T_DISPATCH, T_TX
+ *   usb_tables + 512   T_CRC16     512 B   SHARED, and +288 from usb_tx_tables
  *   usb_tables + 1024  T_CRC5       32 B   receive: token CRC5
  *
  * Neither engine can hold the shared copy at a link-time-unknown offset -

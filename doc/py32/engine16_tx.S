@@ -708,6 +708,15 @@ usb_tx_tables:
 	.word   usb_tx_cellP0 + 1		/* 7: n = 10                         */
 
 .Ltab_txrows:
+	/* engine16_merged.S's usb_in_render walks this same table with the
+	 * same index, (state+1)*32 + nibble*2, so it needs the base that
+	 * index is relative to - which is 32 bytes BELOW row 1, and which
+	 * moved when T_EXH and T_DISPATCH were put in front of the rows.
+	 * Exporting it makes that coupling the linker's problem.  It was a
+	 * comment before, and moving the table silently broke the other
+	 * consumer; tools/prerender_check.py's emulator is what caught it. */
+	.global usb_tx_trows_base
+	.set    usb_tx_trows_base, .Ltab_txrows - 32
 
 	/* T_TX: 7 stuff states x 16 data nibbles, at row (state+1).
 	 * halfword = m<<9 | (n-4)<<8 | (state'+1)<<5,  m = w + 2^n - 1. */
