@@ -87,9 +87,12 @@ def wire(pid, payload, crc=True):
 
 # ------------------------------------------------------------- the harness
 class Bus:
-    def __init__(self, elf, syms, levels, t0, period, dribble=0.0):
+    def __init__(self, elf, syms, levels, t0, period, dribble=0.0,
+                 jitter=0.0, seed=0):
         self.syms, self.levels = syms, levels
         self.t0, self.period, self.dribble = t0, period, dribble
+        self.jitter, self.seed = jitter, seed
+        self._jit = None
         self.cost = {}
         for addr, (sz, mnem, ops) in disassemble(elf).items():
             lo, hi = cyc_cost(mnem, ops, "flash", ("r7",), ("r4",))
@@ -134,12 +137,36 @@ class Bus:
             pass
         return True
 
+    def _bound(self, n):
+        """Where cell n actually STARTS.  With jitter every cell boundary is
+        displaced independently, which is what source jitter and cable skew do
+        to the transitions the sample has to sit between; a uniform delay would
+        just be a phase shift and would measure nothing."""
+        b = self.t0 + n * self.period
+        if not self.jitter:
+            return b
+        if self._jit is None:
+            import random
+            r = random.Random(self.seed)
+            self._jit = [r.uniform(-self.jitter, self.jitter)
+                         for _ in range(len(self.levels) + 2)]
+        return b + self._jit[n] if 0 <= n < len(self._jit) else b
+
     def level_at(self, t):
         if t < self.t0:
             return J
         i = (t - self.t0) / self.period
         idx = int(i)
+        if self.jitter and 0 <= idx < len(self.levels):
+            # boundaries stay ordered as long as jitter < period/2, so at most
+            # one step of correction is ever needed
+            if t < self._bound(idx):
+                idx -= 1
+            elif t >= self._bound(idx + 1):
+                idx += 1
         if idx >= len(self.levels):
+            return J
+        if idx < 0:
             return J
         # dribble: the last driven bit may be held past its cell boundary
         if self.dribble and idx == len(self.levels) - 6 and \
@@ -175,13 +202,14 @@ class Bus:
                          None, a, a)
         return self
 
-    def configure(self, levels, t0, period, dribble=0.0):
+    def configure(self, levels, t0, period, dribble=0.0, jitter=0.0, seed=0):
         """Re-point an already-built harness at another waveform.  Mapping the
         64 KB image and disassembling it costs more than the emulation does, so
         a sweep that rebuilds a Bus per data point spends most of its time in
         the setup; this makes one Bus per ELF serve every point."""
         self.levels, self.t0, self.period, self.dribble = \
             levels, t0, period, dribble
+        self.jitter, self.seed, self._jit = jitter, seed, None
         self.samples, self.driven, self.calls = [], [], []
         return self
 

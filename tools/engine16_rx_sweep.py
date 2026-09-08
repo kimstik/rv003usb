@@ -195,16 +195,26 @@ def variant(text, poll, k, p):
 WANT_R3 = len(PAY) + 3
 
 
-def decodes(bus, entry, t0, ppm, dribble, syms):
+def decodes(bus, entry, t0, ppm, dribble, syms, jitter=0.0, seed=0):
     """ACCEPTED, not merely "the buffer looks right".  The engine writes the
     buffer as it goes and only then tests the residue, so a frame that gained
     or lost a bit still leaves 80 c3 01..08 in RAM; the verdict exists only as
     the call to the C dispatch, and its r3 carries the length."""
-    bus.configure(wire(PID, PAY), t0, CELL * (1.0 + ppm / 1e6), dribble)
+    bus.configure(wire(PID, PAY), t0, CELL * (1.0 + ppm / 1e6), dribble,
+                  jitter, seed)
     bus.run(entry)
     if bytes(bus.uc.mem_read(syms["usb_rxbuf"] + 2, len(WANT))) != WANT:
         return False
     return len(bus.calls) == 1 and bus.calls[0][4] == WANT_R3
+
+
+def ok(bus, entry, t0, ppm, dribble, syms, jitter, seeds):
+    """Decodes for EVERY jitter realisation, not on average: a receiver that
+    works for two transition patterns out of three does not work."""
+    if not jitter:
+        return decodes(bus, entry, t0, ppm, dribble, syms)
+    return all(decodes(bus, entry, t0, ppm, dribble, syms, jitter, sd)
+               for sd in range(seeds))
 
 
 def entry_window(bus, syms, dribble):
@@ -220,7 +230,7 @@ def entry_window(bus, syms, dribble):
     return (best[0], best[-1]) if best else (None, None)
 
 
-def offsets(bus, syms, entries, phases, dribble):
+def offsets(bus, syms, entries, phases, dribble, jitter=0.0, seeds=1):
     """Where the locked sample sits in the cell, and at which (entry, phase)
     the extremes occur - those two points are where the clock tolerance is
     worst in each direction."""
@@ -231,9 +241,10 @@ def offsets(bus, syms, entries, phases, dribble):
     for e in entries:
         for k in range(phases):
             t0 = k / float(phases)
-            if not decodes(bus, e, t0, 0.0, dribble, syms):
+            if not ok(bus, e, t0, 0.0, dribble, syms, jitter, seeds):
                 fails += 1
-                continue
+            bus.configure(wire(PID, PAY), t0, float(CELL), dribble)
+            bus.run(e)
             oo = [o for (_t, i, o) in bus.samples if 8 <= i < 14]
             if not oo:
                 fails += 1
@@ -246,27 +257,32 @@ def offsets(bus, syms, entries, phases, dribble):
     return lo, hi, fails, hist
 
 
-def edge_ppm(bus, syms, entry, t0, dribble, sign, res=25, limit=40000):
+def edge_ppm(bus, syms, entry, t0, dribble, sign, res=25, limit=40000,
+             jitter=0.0, seeds=1):
     """Largest clock error of the given sign that still decodes the longest
     packet from this entry and phase, to `res` ppm.  Doubling then bisecting:
     the pass region is an interval around nominal, so the first failure bounds
     it, and scanning past a failure would report the far side of a hole as
     margin."""
-    if decodes(bus, entry, t0, sign * limit, dribble, syms):
+    if not ok(bus, entry, t0, 0.0, dribble, syms, jitter, seeds):
+        return 0
+    if ok(bus, entry, t0, sign * limit, dribble, syms, jitter, seeds):
         return sign * limit
     good, bad = 0, res
-    while bad <= limit and decodes(bus, entry, t0, sign * bad, dribble, syms):
+    while bad <= limit and ok(bus, entry, t0, sign * bad, dribble, syms,
+                              jitter, seeds):
         good, bad = bad, bad * 2
     while bad - good > res:
         mid = (good + bad) // 2
-        if decodes(bus, entry, t0, sign * mid, dribble, syms):
+        if ok(bus, entry, t0, sign * mid, dribble, syms, jitter, seeds):
             good = mid
         else:
             bad = mid
     return sign * good
 
 
-def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE):
+def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE,
+            jitter=0.0, seeds=3):
     eng = os.path.join(workdir, "eng%s.S" % tag)
     with open(eng, "w") as f:
         f.write(src)
@@ -277,7 +293,8 @@ def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE):
     if lo is None:
         return {"entry": None}
     ents = list(TOL_ENTRIES if entries is None else entries)
-    omin, omax, fails, hist = offsets(bus, syms, ents, phases, dribble)
+    omin, omax, fails, hist = offsets(bus, syms, ents, phases, dribble,
+                                      jitter, seeds)
     r = {"entry": (lo, hi), "omin": omin[0], "omax": omax[0],
          "fails": fails, "hist": hist}
     if omin[1] is None:
@@ -287,10 +304,12 @@ def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE):
     for e in ents:
         for k in range(phases):
             t = k / float(phases)
-            v = edge_ppm(bus, syms, e, t, dribble, +1)
+            v = edge_ppm(bus, syms, e, t, dribble, +1, jitter=jitter,
+                         seeds=seeds)
             if v < plus:
                 plus, pw = v, (e, t)
-            v = edge_ppm(bus, syms, e, t, dribble, -1)
+            v = edge_ppm(bus, syms, e, t, dribble, -1, jitter=jitter,
+                         seeds=seeds)
             if v > minus:
                 minus, pl = v, (e, t)
     r["plus"], r["minus"] = plus, minus
@@ -300,14 +319,15 @@ def measure(src, workdir, tag, entries=None, phases=8, dribble=DRIBBLE):
 
 
 def job(a):
-    poll, k, p, quick, dribble = a
+    poll, k, p, quick, dribble, jitter = a
     wd = tempfile.mkdtemp(prefix="e16sw.")
     try:
         text = open(ENGINE).read()
         src = variant(text, poll, k, p)
         ents = TOL_ENTRIES[::3] if quick else None
         r = measure(src, wd, "s", entries=ents,
-                    phases=4 if quick else 8, dribble=dribble)
+                    phases=4 if quick else 8, dribble=dribble,
+                    jitter=jitter)
     except Exception as exc:                       # a variant that will not
         r = {"entry": None, "err": "%s: %s" % (type(exc).__name__, exc)}
     finally:
@@ -340,13 +360,16 @@ def main():
     ap.add_argument("--p", default="3")
     ap.add_argument("--dribble", type=float, default=DRIBBLE,
                     help="EOP dribble held in the first SE0 cell, in cycles")
+    ap.add_argument("--jitter", type=float, default=0.0,
+                    help="per-transition jitter, cycles (0.6 = 25 ns at 24MHz)")
     ap.add_argument("--verify", action="store_true",
                     help="measure the committed source on the full grid")
     args = ap.parse_args()
 
     if args.verify:
         wd = tempfile.mkdtemp(prefix="e16sw.")
-        r = measure(open(ENGINE).read(), wd, "v", dribble=args.dribble)
+        r = measure(open(ENGINE).read(), wd, "v", dribble=args.dribble,
+                    jitter=args.jitter)
         print("committed source, full grid:")
         print(fmt(("committed", -1, -1), r))
         for o in sorted(r["hist"]):
@@ -357,12 +380,13 @@ def main():
 
     ks = [int(x) for x in args.k.split(",")]
     ps = [int(x) for x in args.p.split(",")]
-    todo = [(poll, k, p, args.quick, args.dribble)
+    todo = [(poll, k, p, args.quick, args.dribble, args.jitter)
             for poll in args.polls.split(",") for k in ks for p in ps]
-    print("engine16_rx_sweep: %d candidates, dribble floor %.2f cycles, "
-          "entries %d..%d x %d phases, %s grid"
-          % (len(todo), args.dribble, TOL_ENTRIES[0], TOL_ENTRIES[-1],
-             4 if args.quick else 8, "quick" if args.quick else "full"))
+    print("engine16_rx_sweep: %d candidates, dribble %.2f cyc, jitter %.2f "
+          "cyc, entries %d..%d x %d phases, %s grid"
+          % (len(todo), args.dribble, args.jitter, TOL_ENTRIES[0],
+             TOL_ENTRIES[-1], 4 if args.quick else 8,
+             "quick" if args.quick else "full"))
     with multiprocessing.Pool(args.jobs) as pool:
         out = []
         for key, r in pool.imap(job, todo):
