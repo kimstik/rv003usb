@@ -8,3 +8,7 @@ demo_*.bin
 bootloader.bin
 bootloader_wg015/blobs/*.bin
 bootloader_wg015/blobs/blobs.h
+
+# python bytecode
+__pycache__/
+*.pyc

@@ -105,6 +105,7 @@ class Bus:
         self.cyc = 0
         self.samples = []          # (cycle, bit index, offset within the cell)
         self.driven = []           # (cycle, BSRR word) - what WE put on the bus
+        self.calls = []            # (cycle, r0, r1, r2, r3) at a watched call
         self.pending = None
         uc.hook_add(UC_HOOK_CODE, self._code)
         # Any peripheral the engine touches that this harness does not model -
@@ -157,6 +158,32 @@ class Bus:
     def _wr(self, uc, offset, size, value, ud):
         if offset == (GPIO_BASE & 0xFFF) + BSRR_OFS:
             self.driven.append((self.cyc, value))
+
+    def watch(self, addr):
+        """Record every call to `addr` with its argument registers.  The bytes
+        in the receive buffer are written whether or not the engine ACCEPTS the
+        packet: the CRC verdict and the byte count only ever appear as the
+        arguments of the C dispatch.  A check that reads the buffer alone
+        cannot tell a decoded packet from a rejected one."""
+        a = addr & ~1
+        from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1,
+                                       UC_ARM_REG_R2, UC_ARM_REG_R3)
+        regs = (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3)
+        self.uc.hook_add(UC_HOOK_CODE,
+                         lambda u, ad, sz, ud: self.calls.append(
+                             tuple([self.cyc] + [u.reg_read(r) for r in regs])),
+                         None, a, a)
+        return self
+
+    def configure(self, levels, t0, period, dribble=0.0):
+        """Re-point an already-built harness at another waveform.  Mapping the
+        64 KB image and disassembling it costs more than the emulation does, so
+        a sweep that rebuilds a Bus per data point spends most of its time in
+        the setup; this makes one Bus per ELF serve every point."""
+        self.levels, self.t0, self.period, self.dribble = \
+            levels, t0, period, dribble
+        self.samples, self.driven, self.calls = [], [], []
+        return self
 
     def run(self, entry_cyc, limit=200000):
         uc = self.uc
@@ -214,8 +241,13 @@ def sweep_offset(elf, syms, entries, phases):
 
 def sweep_ppm(elf, syms, entry, lo, hi, step):
     """How far the device clock may sit from nominal and still decode the
-    longest packet.  Positive ppm = the device's cell is longer than the
-    host's bit, i.e. the device clock is SLOW."""
+    longest packet.  `period` is DEVICE CYCLES PER HOST BIT, so a larger
+    period means more device cycles fit in one bit: positive ppm = the device
+    clock is FAST.  This docstring had it backwards, and so did commit
+    b729cff's message, which blamed the tight side on a fast clock.  Verified
+    the other way round by watching the drift: at -3000 ppm the sample climbs
+    13.7 and wraps past the end of the cell, at +3000 ppm it falls 12.3 -> 8.4.
+    The tight side is the SLOW clock."""
     pay = bytes(range(1, 9))
     ok = []
     v = lo
