@@ -311,7 +311,7 @@ at `usb_rx_chain`, now spanning `.Lprime .. .Lprime_end`.
     # It transforms either layout, and `--polls out6r --k 16` applied to the
     # OLD file reproduces the committed one byte for byte (6526 B, identical
     # numbers) - which is the cross-check that what was swept is what shipped.
-    git show d9581cc^:doc/py32/engine16_merged.S > /tmp/base.S
+    git show 5c89b68:doc/py32/engine16_merged.S > /tmp/base.S   # last commit with the old lock
     python3 tools/engine16_rx_sweep.py --source /tmp/base.S --jitter 0.6 \
             --polls orig,out6r --k 16,20
     python3 tools/engine16_rx_sweep.py --jitter 0.6 --polls orig,out6r,back4r --k 14,15,16,17,18
