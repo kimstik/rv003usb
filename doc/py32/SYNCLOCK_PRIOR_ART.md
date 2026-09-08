@@ -397,6 +397,22 @@ creating a bit stuff error at the end of the packet)".
 
 ### 3.3 Dribble — and our "floor of 7" is *arithmetically* right and *substantively* moot
 
+> **CORRECTION (see `doc/py32/SAMPLE_POINT.md` §2).**  The measurement below —
+> "a full 16 cycles of hold decodes correctly" — was made by comparing the
+> bytes in `usb_rxbuf`.  The engine writes that buffer as the packet arrives
+> and only tests the CRC16 residue afterwards, so the buffer is byte-identical
+> whether the frame is accepted or rejected.  Checked instead against the
+> engine's actual verdict — did it reach `usb_pid_handle_data`, past the
+> residue test, with the right length — the largest tolerated hold is
+> **exactly `o_min`**, the bottom of the sample band, for every candidate
+> measured.  A 10-cycle hold is already rejected.  The floor is real and it
+> does bind: a sample inside the hold reads it as a data bit, the EOP lands one
+> cell late, the data field stops being a whole number of wire bytes, and a
+> thirteenth byte enters the residue.  The conclusion of this section — that
+> the floor should be retired as a constraint — does not stand; the conclusion
+> of §3.4, that the band must be centred, does, and the two turn out to pick
+> the same delay (SAMPLE_POINT.md §2).
+
 **§7.1.9.1** is the only place the spec defines dribble:
 
 > "The time interval just before an EOP is a special case.  The last data bit

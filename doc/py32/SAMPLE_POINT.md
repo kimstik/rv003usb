@@ -71,9 +71,28 @@ The tolerated dribble is **exactly `o_min`**, in every case.  So the engine does
 not absorb a held last bit at all: a sample that lands inside the hold reads it
 as a data bit, the EOP is detected one cell late, and the frame is rejected.
 USB 2.0 §7.1.9 allows 260 ns = 6.24 cycles at 24 MHz, so `o_min >= 6.24` is a
-hard floor and the fast-clock limit really is `(o_min - 6.24)/(16 N)`.  (A
-claim elsewhere that engine16 decodes a 666 ns hold does not survive the
-accept-based check above; it is the buffer-compare leniency of §1.)
+hard floor and the fast-clock limit really is `(o_min - 6.24)/(16 N)`.
+
+`doc/py32/SYNCLOCK_PRIOR_ART.md` §3.3 concludes the opposite - "holding the last
+data level for a full 16 cycles (666 ns) into the first SE0 cell decodes
+correctly ... the dribble floor does not bind on this engine at any sample
+offset it can produce" - and retires the floor as a constraint.  That is the
+buffer-compare leniency of §1.  At entry latency 16 on the engine as committed
+here, one held cell at a time:
+
+| hold | `usb_rxbuf+2` (12 bytes) | verdict |
+|---|---|---|
+| 0.00 c | `80c301020304050607084f30` | dispatch, r3 = 11 |
+| 6.24 c | `80c301020304050607084f30` | dispatch, r3 = 11 |
+| 9.00 c | `80c301020304050607084f30` | dispatch, r3 = 11 |
+| 10.00 c | `80c301020304050607084f30` | **NOT CALLED - frame rejected** |
+| 16.00 c | `80c301020304050607084f30` | **NOT CALLED - frame rejected** |
+
+The buffer is byte-identical in all five.  A sample inside the hold reads it as
+a data bit, so the EOP arrives one cell late, the data field is no longer a
+whole number of wire bytes, a thirteenth byte is emitted and the residue is
+computed over it.  The trailing-partial-byte handling §3.3 cites does not save
+it; it is what makes the *count* wrong.  Reproduce with the snippet in §8.
 
 The ceiling is 16 - the sample must not cross into the next cell - less
 whatever the transitions themselves move.  Transition jitter is modelled
@@ -94,6 +113,24 @@ is a *total receiver budget* that already contains the sampling uncertainty
 this document is about; adding it on top double-counts.  Measured, at
 `--jitter 1.7` (70 ns) every candidate already fails somewhere.  The band that
 can actually be defended is the one at +-25 ns.
+
+**The two criteria pick the same winner, so the question does not have to be
+adjudicated.**  Read as a hard band, §7.1.15.1 + Table 7-5 say the sample must
+stay in cycles 3.4..12.6 of 16.  Of the candidates with a usable entry window:
+
+| candidate | band | inside 3.4..12.6? | above the 6.24 floor? | symmetric @25 ns |
+|---|---|---|---|---|
+| committed before | 9.00..15.88 | **no** (3.3 cycles outside) | yes | 0 |
+| out6r K=14 | 7.00..9.88 | yes | yes | 0.015 % |
+| out6r K=15 | 8.00..10.88 | yes | yes | 0.090 % |
+| **out6r K=16** | **9.00..11.88** | **yes** | **yes** | **0.155 %** |
+| out6r K=17 | 10.00..12.88 | **no** (0.28 over) | yes | 0.133 % |
+| out6r K=18 | 11.00..13.88 | **no** | yes | 0 |
+
+K=16 is the largest fixed delay whose whole band still fits inside 3.4..12.6,
+and it is also the best measured tolerance among those that fit.  K=17, which
+wins by 0.009 % on the no-jitter number alone, fails the band and loses on the
+jitter number - the two criteria agree.
 
 ## 3. The sweep
 
@@ -270,6 +307,19 @@ at `usb_rx_chain`, now spanning `.Lprime .. .Lprime_end`.
     python3 tools/engine16_rx_bus.py                      # G6 window, G7 band
     python3 tools/engine16_rx_sweep.py --verify --jitter 0.6
     python3 tools/engine16_rx_sweep.py --jitter 0.6 --polls orig,out6r,back4r --k 14,15,16,17,18
+    # the dribble table of section 2
+    python3 -c "
+    import sys; sys.path.insert(0,'tools')
+    import tempfile
+    from engine16_rx_sweep import *
+    wd=tempfile.mkdtemp(); elf,syms=build(ENGINE,TX,wd,tag='dr')
+    b=Bus(elf,syms,wire(PID,PAY),0.0,float(CELL),0.0)
+    b.watch(syms['usb_pid_handle_data'])
+    for d in (0.0,6.24,9.0,10.0,16.0):
+        b.configure(wire(PID,PAY),0.0,float(CELL),d); b.run(16)
+        print(d, bytes(b.uc.mem_read(syms['usb_rxbuf']+2,12)).hex(),
+              b.calls or 'REJECTED')"
+
     python3 tools/engine16_rx_model.py                    # 415 packets, 0 failures
     python3 tools/prerender_check.py                      # phases 1 and 2 PASS
     for c in 0 1 2; do for f in 0 1; do
