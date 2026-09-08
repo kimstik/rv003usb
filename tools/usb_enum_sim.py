@@ -1283,7 +1283,6 @@ def timing_sweep_in(elf, syms, latency, endpoints=2):
         for ep in range(endpoints):
             k = token_stuff_count(PID_IN, a, ep) & 7
             want.setdefault(k, (a, ep))
-    want.pop(0, None) if False else None
     reach_any = sorted({token_stuff_count(PID_IN, a, ep) & 7
                         for a in range(128) for ep in range(16)})
     got = {}
