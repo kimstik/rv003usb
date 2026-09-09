@@ -29,6 +29,16 @@ battery: 201 runs, 67 distinct stimuli
 instructions in the linked image: 2484   executed: 1307 (52.6%)
 ```
 
+**As of `BUS_COLLISIONS.md` this reads 1123 of 2686 (41.8 %), and the drop is
+the point.** That battery stubs the C layer, so no IN arm record is ever
+filled; the new arm gate correctly declines every IN token and the whole IN
+chain goes cold. Before the gate the EOP stub armed on the received PID alone
+and the chain ran as far as `TIG9` on its way to an abort — warm code on the
+path that WAS the defect. Coverage counts instructions executed, not
+instructions that should have been; `tools/usb_enum_sim.py` and
+`tools/usb_bus_fuzz.py`, which link the real C layer, are what exercise that
+chain now.
+
 67 stimuli: every PID the stack can meet (SETUP/IN/OUT/SOF/DATA0/DATA1/
 ACK/NAK/STALL), payload lengths 0..8 in both data toggles, tokens at three
 addresses and three endpoints, a corrupted CRC16, a bit-stuffing violation,

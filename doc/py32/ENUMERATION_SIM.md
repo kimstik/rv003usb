@@ -12,6 +12,14 @@
 > addressed to *another device*, and answers an IN for an endpoint it does not
 > have — in every case turning its pin drivers on and holding the line for
 > ~20 bit times past the point the host may start its next packet.
+>
+> **Superseded for §4.1–4.3.** `BUS_COLLISIONS.md` fixes all three, and the
+> two more shapes `usb_bus_fuzz.py` found alongside them: the arm decision
+> moved ahead of `TBARM` and now costs 11 cycles on DATA→ACK (τ+107 →
+> τ+118) and 16 on IN→DATA (τ+94 → τ+110). The §3 tables below are the
+> pre-fix ones; §4.2 of `BUS_COLLISIONS.md` has both. §2.1's latency window
+> is also superseded — the holes were the harness abandoning a transfer a
+> real host would have retried, not the phase lock. §4.4–4.9 stand.
 
 Reproduce everything below with:
 
