@@ -480,6 +480,14 @@ def make(plant, f0, target=24e6, defines=(), band_h=None, elfcache={}):
     icscr0 = plant.icscr_for(f0, h=band_h)
     s = Servo(elf, syms, plant, icscr0)
     s.init()
+    # Re-zero the time base after init so that host time 0 is the first bus
+    # edge, not the moment py32_hsical_init() returned.  Without this the
+    # first measured interval is short by the cost of init() and the servo
+    # takes a spurious kick on frame 2 - a harness artefact, not a defect.
+    s.st_ref_cyc -= s.cyc
+    s.cyc = 0.0
+    s.t = 0.0
+    s.exec_cycles = 0
     s.target = target
     return s
 
@@ -924,8 +932,8 @@ def e8():
 
 @experiment("E9", "cost: what one call actually takes")
 def e9():
-    p = Plant("F002B_FS100")
-    s = make(p, 24e6 * 1.02, band_h=5)
+    p_ = Plant("F002B_FS100")
+    s = make(p_, 24e6 * 1.02, band_h=5)
     costs = {}
     t = 0.0
     for n in range(12):
@@ -935,11 +943,19 @@ def e9():
         t += FRAME
     print("    py32_hsical_event, cycles per call, first 12 frames:")
     print("      " + "  ".join("%d:%d" % (k, v) for k, v in costs.items()))
-    # a rejected interval: two edges 20 us apart
+    # a rejected interval: a second edge 20 us after a keep-alive
+    deliver(s, t)
     c0 = s.exec_cycles
     deliver(s, t + 20e-6)
     print("    rejected (out-of-window) interval: %d cycles"
           % (s.exec_cycles - c0))
+    # the path that writes ICSCR, timed on its own
+    s2 = make(p_, 24e6 * 1.02, band_h=5)
+    deliver(s2, 0.0)
+    c0 = s2.exec_cycles
+    deliver(s2, FRAME)
+    print("    the path that writes ICSCR:        %d cycles"
+          % (s2.exec_cycles - c0))
     print("    (the .c comment claims 12 instructions on the reject path,"
           " ~20 in the dead band, ~40 when it writes ICSCR)")
     print("    instructions in py32_hsical.c executed at least once: %d"
