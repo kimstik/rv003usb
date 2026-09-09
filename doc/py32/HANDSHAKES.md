@@ -215,7 +215,8 @@ them expensive.
 
 `usbTxLen` is reset to `USBPID_NAK` immediately after every transmit
 (`asmcommon.inc:148`, with the reasoning spelled out at `asmcommon.inc:153-160`)
-and at init (`usbdrv.c:627`) and on every SETUP (`usbdrv.c:449`). The default
+at init (`usbdrv.c:30` for endpoint 0, `usbdrv.c:627` for endpoint 1) and on
+every SETUP (`usbdrv.c:449`). The default
 answer to an IN is therefore NAK, and the application converts it to data by
 filling the buffer. Two flow-control uses:
 
@@ -532,7 +533,7 @@ with the result cached in `osvc` under
 The device does hit this. `demo_gamepad`'s descriptor table
 (`demo_gamepad/usb_config.h:154-165`) is keyed `(wIndex<<16)|wValue`; the probe
 is `wValue = 0x03EE, wIndex = 0`, key `0x000003EE`, no entry, so
-`rv003usb.c:461-473` leaves `e->opaque = 0` and the IN is answered with a
+`rv003usb.c:457-471` leaves `e->opaque = 0` and the IN is answered with a
 zero-length DATA1 (`rv003usb.c:272-275`).
 
 **Damage:** one extra bus reset per device per machine, on Windows XP only. On
@@ -557,7 +558,7 @@ to DATA0 on a success it was handed for nothing, while the device's
 
 **But it self-heals.** §8.6.3/§8.6.4: the host receives the next report with the
 unexpected toggle, discards it as a retransmission, and ACKs anyway (Table 8-5);
-`usb_pid_handle_ack` (`rv003usb.c:517-521`) flips `e->toggle_in` on that ACK and
+`usb_pid_handle_ack` (`rv003usb.c:519-524`) flips `e->toggle_in` on that ACK and
 the two are back in step. Cost: **one dropped report**, not a wedged endpoint.
 
 The other instances are inert on the demos as configured:
@@ -578,7 +579,7 @@ the unmatched branch would break enumeration outright. §5 respects that.
 (i.e., no interrupt is pending), the function returns a NAK handshake during the
 data phase." The stack cannot, and instead requires the handler to produce a
 packet synchronously inside the ISR (`rv003usb.h:68`). `demo_pikokey_hid`
-(`demo_pikokey_hid/*.c:44-67`) sends a full 8-byte report on **every** poll
+(`demo_pikokey_hid/pikokey.c:44-67`) sends a full 8-byte report on **every** poll
 whether or not anything changed.
 
 **What breaks: nothing.** The host receives a valid report each interval; a
@@ -672,7 +673,7 @@ reader or writer anywhere in the tree), so the `_Static_assert` at
 
 1. `rv003usb.c:396-400` — add `e->reserved1 = 0;` beside `e->custom = 0;`, so
    the flag is cleared for every SETUP.
-2. after the GET_DESCRIPTOR search loop (`rv003usb.c:461-473`) — add
+2. after the GET_DESCRIPTOR search loop (`rv003usb.c:457-471`) — add
    `if( !e->opaque ) e->reserved1 = 1;`
 3. `rv003usb.c:272` — ahead of the empty/data decision in `usb_pid_handle_in`:
    `if( e->reserved1 ) { usb_send_data( 0, 0, 2, 0x1E ); return; }`
