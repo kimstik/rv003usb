@@ -2219,6 +2219,19 @@ rx_flush7:
 1:	mov     r2, r9
 	strb    r0, [r2, #TB_OWED_OFS]
 	strb    r1, [r2, #TB_PID_OFS]
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+	/* The transmit suppression is a ONE-SHOT within one ISR: every
+	 * setter is followed, in the same call chain, by the usb_send_data
+	 * that consumes it.  Every setter except one - the IN gate sets it
+	 * for a token that may reach no usb_send_data at all, because the
+	 * address filter drops it first.  Clearing here bounds the flag's
+	 * life to the packet that set it, so a suppression can never be
+	 * spent on somebody else's transmission.  It is a no-op on every
+	 * path that consumed it. */
+	ldr     r0, =usb_tx_suppress
+	movs    r1, #0
+	strb    r1, [r0, #0]
+#endif
 	/* Acknowledge last, not first: our own transmission has toggled D- by
 	 * now and set the flag again, so clearing here is what makes the ISR
 	 * run once per packet - the predecessor's interrupt_complete does the
@@ -2449,7 +2462,20 @@ ti_gate\idx:
 	cmp     r2, #0			/* 1  (a learned key outlives a      */
 	beq     2f			/* 1   render that never happened)   */
 	b       ti_flush\idx		/* 2-3  answer it                    */
-2:	ldr     r2, =(rx_flush\idx + 1)	/* 2/4  not ours: the ordinary tail, */
+	/* NOT ANSWERED HERE - and the C layer must not answer it LATE
+	 * either.  The token still goes up the ordinary tail, because that
+	 * is what renders the response the RETRY will be answered with
+	 * (design_b_in.md S6); what must not happen is usb_send_data
+	 * actually transmitting it, ~870 cycles after tau, which is 53 bit
+	 * times and long past the 16-18 the host waits.  The abort path
+	 * this gate replaces suppressed that transmission through
+	 * .Ltb_sent; so does this, and .Lusb_done clears the flag if
+	 * nothing consumed it - a token for ANOTHER device reaches no
+	 * usb_send_data at all. */
+2:	movs    r2, #1
+	ldr     r6, =usb_tx_suppress
+	strb    r2, [r6, #0]
+	ldr     r2, =(rx_flush\idx + 1)	/* 2/4  not ours: the ordinary tail, */
 	bx      r2			/* 3    and not one edge on the wire */
 	.endm
 

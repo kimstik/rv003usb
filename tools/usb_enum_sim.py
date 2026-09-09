@@ -901,7 +901,23 @@ class Enum:
                              "%s IN a%d e%d" % (label, addr, endp))
             self.record("%s IN a%d e%d" % (label, addr, endp), r, "IN->DATA")
             if not r.drove:
-                return None, r          # timeout: host would retry too
+                # Silence.  A real host does not abandon the transfer here:
+                # it waits out the 16-18 bit-time timeout of S7.1.18 and
+                # retries, up to three attempts (S5.5.5) - the same budget
+                # it spends on a packet it could not decode.  Design B's IN
+                # path answers from a record armed by a PREVIOUS
+                # transaction, so the first token carrying a pattern the
+                # device has not seen draws nothing at all (before the arm
+                # gate it drew a deliberately corrupt packet instead, which
+                # is why this branch used to be a dead end).
+                self.retries += 1
+                if attempt == allow_retry:
+                    self.bad("%s IN a%d e%d" % (label, addr, endp),
+                             "no response after %d attempts"
+                             % (allow_retry + 1),
+                             "the device drove nothing")
+                    return None, r
+                continue
             p = r.pkt
             if p.get("type") == "data" and p.get("crc_ok") and p["pid_ok"]:
                 return p, r
