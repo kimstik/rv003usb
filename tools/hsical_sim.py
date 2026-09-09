@@ -657,10 +657,10 @@ def e3():
     p = Plant("F002B_FS100")
     rows = []
     lo_ok = hi_ok = None
-    lo_bad = hi_bad = None
+    fails = []
     for e0pct in [x / 2.0 for x in range(-80, 121, 1)]:
         f0 = 24e6 * (1 + e0pct / 100.0)
-        if not (p.freq((4 << 13) | 0) <= f0 <= p.freq((4 << 13) | 0xFFF)):
+        if not (p.freq((4 << 13) | 0) <= f0 <= p.freq((4 << 13) | 0x1FFF)):
             continue
         s = make(p, f0)
         tr = runsim(s, 200)
@@ -669,15 +669,17 @@ def e3():
             lo_ok = e0pct if lo_ok is None else min(lo_ok, e0pct)
             hi_ok = e0pct if hi_ok is None else max(hi_ok, e0pct)
         else:
-            if e0pct < 0:
-                lo_bad = e0pct if lo_bad is None else max(lo_bad, e0pct)
-            else:
-                hi_bad = e0pct if hi_bad is None else min(hi_bad, e0pct)
+            fails.append((e0pct, tr.err[-1], tr.state[-1], tr.writes[-1]))
+    print("    swept initial error in 0.5 %% steps over every value the band"
+          " can reach")
     print("    converged to inside +-0.203 %% for initial error in "
           "[%s %%, %s %%]" % (fmt(lo_ok, 1), fmt(hi_ok, 1)))
-    print("    nearest failures: %s below, %s above"
-          % (fmt(lo_bad, 1) if lo_bad is not None else "none",
-             fmt(hi_bad, 1) if hi_bad is not None else "none"))
+    if fails:
+        print("    DID NOT converge at %d of the swept points:" % len(fails))
+        table([(fmt(a, 1), fmt(b), c, d) for a, b, c, d in fails],
+              ["initial err %", "err after 200 frames %", "state", "writes"])
+    else:
+        print("    no failures inside the swept range")
     # the acceptance window the servo itself declares
     print("    servo's own acceptance window: interval in [%d, %d] cycles"
           " = clock in [%.1f, %.1f] MHz = [%.1f %%, %.1f %%]"
@@ -690,7 +692,7 @@ def e3():
     rows = []
     for e0pct in (-30, -20, -10, -5, 0, 5, 10, 20, 30, 40, 50):
         f0 = 24e6 * (1 + e0pct / 100.0)
-        if not (p.freq((4 << 13) | 0) <= f0 <= p.freq((4 << 13) | 0xFFF)):
+        if not (p.freq((4 << 13) | 0) <= f0 <= p.freq((4 << 13) | 0x1FFF)):
             rows.append((fmt(e0pct, 0), "unreachable in this band",
                          "-", "-", "-"))
             continue
