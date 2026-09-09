@@ -477,19 +477,19 @@ void usb_pid_handle_data( uint32_t this_token, uint8_t * data, uint32_t which_da
 		{
 			ist->my_address = wvi;
 		}
-#if 0
-		// These are optional for the most part.
-		else if( reqShl == (0x0080>>1) ) // GET_STATUS = 0x00 ,always reply with { 0x00, 0x00 } 
+		// GET_STATUS is NOT optional: S9.4 Table 9-3 lists it as a standard
+		// request every device must implement, and Linux issues it on every
+		// resume.  Unanswered, the reply is a zero-length DATA1, which the
+		// host reads as a completed short transfer with no status in it -
+		// so it gives up on the device and re-enumerates it, every time it
+		// wakes.  Two bytes: bus-powered, remote wakeup off.
+		else if( reqShl == (0x0080>>1) ) // GET_STATUS = 0x00
 		{
 			e->opaque = (uint8_t*)always0;
-			e->max_len = wLength;
+			// S9.4.5 fixes the reply at two bytes, and `always0` is only
+			// four, so an unclamped wLength reads past it.
+			e->max_len = ( wLength > 2 ) ? 2 : wLength;
 		}
-		else if( reqShl == (0x0a21>>1) ) // GET_INTERFACE = 0x00, always reply with { 0x00 } 
-		{
-			e->opaque = (uint8_t*)always0;
-			e->max_len = wLength;
-		}
-#endif
 		//  You could handle SET_CONFIGURATION == 0x0900 here if you wanted.
 		//  Can also handle GET_CONFIGURATION == 0x0880 to which we send back { 0x00 }, or the interface number.  (But no one does this).
 		//  You could handle SET_INTERFACE == 0x1101 here if you wanted.

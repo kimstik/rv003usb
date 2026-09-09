@@ -59,7 +59,12 @@
 
 #ifndef __ASSEMBLER__
 
-extern uint32_t * always0;
+// Four zero bytes, not a pointer to them: rv003usb.S:1195 defines the data
+// and rv003usb.S:826 takes its ADDRESS with `la`.  Declaring it `uint32_t *`
+// made `(uint8_t*)always0` load the four zero bytes and use them AS the
+// pointer, i.e. NULL - so a GET_STATUS reply would have been read from
+// address 0.  Harmless only while the one use of it was #if 0'd out.
+extern uint32_t always0[];
 
 struct usb_endpoint;
 struct rv003usb_internal;

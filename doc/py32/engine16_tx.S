@@ -863,6 +863,16 @@ usb_tables:
 	.error  "engine16 tables: the block is not 1344 bytes"
 	.endif
 
+/* The two status bytes GET_STATUS replies with (S9.4.5: bus-powered, remote
+ * wakeup off).  The RISC-V port defines this in rv003usb.S:1195; the C layer
+ * is shared, so the ARM port owes the same symbol.  Read-only, and four bytes
+ * because that is what the other port's `.byte 0x00` expands to. */
+	.section .rodata.always0, "a", %progbits
+	.balign 4
+	.global always0
+always0:
+	.word   0
+
 	.section .bss.usb_txbuf, "aw", %nobits
 	.balign 4
 	.global usb_txbuf
