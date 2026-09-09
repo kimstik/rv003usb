@@ -216,11 +216,29 @@ class Bus:
         self.samples, self.driven, self.calls = [], [], []
         return self
 
-    def run(self, entry_cyc, limit=200000):
+    # usb_rxbuf+28/+29 - the engine's own arm state.  Kept here rather than
+    # imported so this file still says, in one place, what state it puts the
+    # device in before it injects a packet.
+    TB_OWED_OFS, TB_PID_OFS, TB_PID_ACK = 28, 29, 0xD2
+
+    def run(self, entry_cyc, limit=200000, armed=True):
+        """Enter the receive ISR at `entry_cyc` with the packet on the wire.
+
+        `armed` puts the device in the state a SETUP or OUT token addressed
+        to it leaves behind, which is the ONLY state in which a DATA packet
+        may legally appear on this wire (USB 2.0 S8.5.3: a DATA packet
+        carries no address, so its token is what makes it ours).  The engine
+        drops a DATA that nothing armed - LATE_RESPONSES.md - so injecting
+        one into a fresh machine measures the reject path, not the decode
+        path.  Pass armed=False only when the reject IS the measurement."""
         uc = self.uc
         self.cyc = entry_cyc
         self.pending = None
         uc.mem_write(RAM_BASE, b"\x00" * (4 * 1024))
+        if armed:
+            rx = self.syms["usb_rxbuf"]
+            uc.mem_write(rx + self.TB_OWED_OFS, b"\x01")
+            uc.mem_write(rx + self.TB_PID_OFS, bytes([self.TB_PID_ACK]))
         uc.reg_write(UC_ARM_REG_SP, RAM_BASE + 16 * 1024 - 0x100)
         stop = self.syms["_start"] & ~1
         uc.reg_write(UC_ARM_REG_LR, stop | 1)
