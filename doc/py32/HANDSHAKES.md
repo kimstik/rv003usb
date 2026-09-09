@@ -300,3 +300,142 @@ statement of relative importance as the prior art can give.
 load-bearing: NAK for IN flow control is kept even at 1.3 kB; STALL is optional
 enough to delete outright; and STALL-on-unsupported-request is not implemented
 by V-USB either.
+
+---
+
+## 3. What the specification actually requires
+
+All citations are to *Universal Serial Bus Specification Revision 2.0*
+(2000-04-27), read from the plain text, plus one Microsoft document where the
+behaviour is Windows-specific.
+
+### 3.0 Groundwork
+
+A handshake packet is SYNC + PID + EOP and nothing else — §8.4.5, "Handshake
+packets ... consist of only a PID ... delimited by an EOP after one byte of
+packet field." That is exactly what `usb_send_data(ptr, 0, 2, PID)` produces, so
+the shape of a NAK or a STALL is already available.
+
+PID values, Table 8-1: ACK `0b0010` → wire byte `0xD2`, NAK `0b1010` → `0x5A`,
+STALL `0b1110` → `0x1E`. All three are stuff-free after SYNC: taken LSB-first
+after SYNC's single trailing one, `0xD2` runs to two consecutive ones, `0x5A` to
+two, `0x1E` to four — under the six that would force a stuffed zero (§7.1.9).
+
+### 3.1 (a) May a device answer an IN it cannot satisfy with a zero-length DATA?
+
+**No.** §8.4.6.1, Table 8-4, is exhaustive for a function receiving an IN:
+
+| Token corrupted | Tx Endpoint Halt | Can Transmit Data | Action |
+|---|---|---|---|
+| Yes | — | — | Return no response |
+| No | Set | — | **Issue STALL handshake** |
+| No | Not set | No | **Issue NAK handshake** |
+| No | Not set | Yes | Issue data packet |
+
+"If the function is unable to send data, due to a halt or a flow control
+condition, it issues a STALL or NAK handshake, respectively" (§8.4.6.1 prose).
+A zero-length DATA packet is the fourth row — "Can Transmit Data: Yes". The
+device is asserting that it *could* transmit and that what it had to transmit
+was nothing. There is no row for "answer an unsatisfiable IN with empty data".
+
+§8.5.4 says the same thing for interrupt endpoints in normative prose: "If the
+endpoint has no new interrupt information to return (i.e., no interrupt is
+pending), the function returns a NAK handshake during the data phase."
+
+**What the host concludes.** A zero-length DATA is a *short packet* and short
+packets end a transfer: §8.5.3.2, "the function should indicate that the Data
+stage is ended by returning a packet that is shorter than the MaxPacketSize for
+the pipe"; §9.4.3, "If the descriptor is shorter than the wLength field, the
+device indicates the end of the control transfer by sending a short packet ...
+A short packet is defined as a packet shorter than the maximum payload size or
+a zero length data packet." So the host reads it as **the transfer completed
+successfully with zero bytes**, which is a different outcome from both "not
+ready, ask again" (NAK) and "cannot" (STALL).
+
+### 3.2 (b) A control request the device does not support
+
+Two clauses, and they are unambiguous:
+
+* **§9.2.7 Request Error** — "When a request is received by a device that is
+  not defined for the device, is inappropriate for the current setting of the
+  device, or has values that are not compatible with the request, then a Request
+  Error exists. The device deals with the Request Error by returning a STALL PID
+  in response to the next Data stage transaction or in the Status stage of the
+  message. It is preferred that the STALL PID be returned at the next Data stage
+  transaction, as this avoids unnecessary bus activity."
+* **§9.4.3 Get Descriptor** — "If a device does not support a requested
+  descriptor, it responds with a Request Error."
+
+and §8.5.3.4: "protocol stall indicates that the request or its parameters are
+not understood by the device and thus provides a mechanism for extending USB
+requests." Protocol STALL is self-clearing — it "lasts until the receipt of the
+next SETUP transaction" — so it costs no recovery handshake from the host.
+
+Note the direction of the requirement. §9.4 states plainly that "USB devices
+must respond to standard device requests" and Table 9-3 lists GET_STATUS,
+GET_CONFIGURATION, GET_INTERFACE and the rest as standard. **The spec's first
+demand is that the device answer the request; STALL is what it owes only for
+requests it genuinely does not support.** That distinction turns out to decide
+§4.
+
+**What a host does with a short packet instead of a STALL.** It reports success
+with a short count, and the caller's own length check — not the USB stack —
+becomes the error detector. Verified against Linux v6.12:
+
+* `drivers/usb/core/message.c:791-798` (`usb_get_descriptor`) — the retry loop
+  is written for exactly this device: `/* retry on length 0 or error; some
+  devices are flakey */ ... if (result <= 0 && result != -ETIMEDOUT) continue;`.
+  Three attempts. A STALL surfaces as `-EPIPE`, which is also `<= 0`, so it is
+  retried the same three times. **On this path Linux cannot tell a zero-length
+  answer from a STALL**, and the cost of each is identical.
+* `message.c:887-905` (`usb_string_sub`) — `if (rc < 2)` retries at length 2 and
+  then at `buf[0]`, then `if (rc < 2) rc = (rc < 0 ? rc : -EINVAL)`. Again
+  zero-length and STALL converge.
+* `message.c:1153-1173` (`usb_get_status`) — a `switch (ret)` accepting only
+  exactly 2 or 4 bytes, `default: ret = -EIO`. A zero-length answer is
+  **`-EIO`**, and so is a STALL's `-EPIPE` at the caller's `if (status)`.
+
+Where the two *do* diverge is a host that treats STALL as a documented,
+cacheable "not supported" and a short packet as a malformed answer. §4.2 has the
+one deployed instance of that.
+
+### 3.3 (c) Is ACKing an OUT to an IN-only endpoint a violation?
+
+Endpoint identity in §5.3.1 includes direction: "Each endpoint on a device is
+given at design time a unique device-determined identifier called the endpoint
+number. Each endpoint has a device-determined direction of data flow. The
+combination of the device address, endpoint number, and direction allows each
+endpoint to be uniquely referenced. Each endpoint is a simplex connection that
+supports data flow in one direction." So EP1-IN and EP1-OUT are two endpoints,
+and `demo_gamepad/usb_config.h:102` declares only `0x81` — EP1-OUT does not
+exist on this device.
+
+This is a real structural gap in the stack — `struct usb_endpoint`
+(`rv003usb/rv003usb.h:160-170`) is indexed by endpoint *number* only
+(`ist->eps[endp]`) and holds `toggle_in` and `toggle_out` in one record, so the
+stack has no representation of direction and cannot distinguish the two. The
+endpoint *number* is bounds-checked and out-of-range tokens get no response at
+all, which is correct:
+
+```
+rv003usb/rv003usb.S:527   li   s0, ENDPOINTS
+rv003usb/rv003usb.S:528   bgeu a2, s0, done_usb_message   // Make sure < ENDPOINTS
+```
+
+But **no table in §8.4.6 covers "the addressed endpoint does not exist"**. Table
+8-6 (function response to OUT) presumes an endpoint that is there; §8.4.6.4
+covers only the SETUP case ("If a non-control endpoint receives a SETUP token,
+it must ignore the transaction and return no response"); the §8.4.6 preamble
+covers only token corruption. The spec addresses this from the *host* side
+instead — §5.3.1: "Endpoints other than those with endpoint number zero are in
+an unknown state before being configured and may not be accessed by the host
+before being configured." An endpoint absent from the configuration descriptor
+is never configured, so a compliant host never issues the transaction.
+
+**Honest verdict on (c): a model violation with no cited clause and no
+compliant-host trigger.** It is wrong — the device claims to have accepted data
+into an endpoint that does not exist — and it is unreachable except from a
+deliberately non-compliant host or a compliance test. Note that V-USB has the
+same hole: `vusb/usbdrv/asmcommon.inc:87-94` routes any OUT to
+`storeTokenAndReturn` and `:104-127` ACKs the data that follows, with no
+direction check either.
