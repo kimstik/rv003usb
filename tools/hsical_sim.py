@@ -670,7 +670,7 @@ def e3():
             hi_ok = e0pct if hi_ok is None else max(hi_ok, e0pct)
         else:
             fails.append((e0pct, tr.err[-1], tr.state[-1], tr.writes[-1]))
-    print("    swept initial error in 0.5 %% steps over every value the band"
+    print("    swept initial error in 0.5 % steps over every value the band"
           " can reach")
     print("    converged to inside +-0.203 %% for initial error in "
           "[%s %%, %s %%]" % (fmt(lo_ok, 1), fmt(hi_ok, 1)))
@@ -759,7 +759,7 @@ def e5():
     burst_icscr = s.icscr
     print("        ICSCR before the burst 0x%04X, after 0x%04X, err %s %% ->"
           " %s %%" % (before, burst_icscr, fmt(tr1.err[-1]), fmt(s.err_pct())))
-    print("    (c) the frame interval is 1.000 ms +-0.05 %% (USB 2.0 s7.1.11)"
+    print("    (c) the frame interval is 1.000 ms +-0.05 % (USB 2.0 s7.1.11)"
           " and the ISR stamp jitters")
     rows = []
     for jit, tol in ((0, 0.0), (4, 0.0), (16, 0.0), (0, 5e-4), (16, 5e-4)):
@@ -1011,6 +1011,41 @@ def e9():
           " ~20 in the dead band, ~40 when it writes ICSCR)")
     print("    instructions in py32_hsical.c executed at least once: %d"
           % len(s.pc_trace))
+    return True
+
+
+@experiment("EB", "the one existing build switch that removes a trap")
+def eb():
+    """PY32_HSICAL_COARSE is already a build switch (py32_hsical.h:52).  This
+    measures what setting it to 0 does to the capture range and to the +32 %
+    runaway E3 found.  It changes no algorithm - it selects the branch the
+    header already offers."""
+    p = Plant("F002B_FS100")
+    for coarse in (1, 0):
+        defs = ("-DPY32_HSICAL_COARSE=%d" % coarse,)
+        lo = hi = None
+        runaway = []
+        for e0pct in [x / 2.0 for x in range(-70, 121, 1)]:
+            f0 = 24e6 * (1 + e0pct / 100.0)
+            if not (p.freq(4 << 13) <= f0 <= p.freq((4 << 13) | 0x1FFF)):
+                continue
+            s = make(p, f0, defines=defs)
+            tr = runsim(s, 200)
+            if settled(tr, WIN_FAST, 30):
+                lo = e0pct if lo is None else min(lo, e0pct)
+                hi = e0pct if hi is None else max(hi, e0pct)
+            elif abs(tr.err[-1]) > abs(tr.err[0]) + 1.0:
+                runaway.append(e0pct)
+        print("    PY32_HSICAL_COARSE=%d: converges over [%s %%, %s %%];"
+              " %d start points end further off than they began%s"
+              % (coarse, fmt(lo, 1), fmt(hi, 1), len(runaway),
+                 (" (" + ", ".join(fmt(x, 1) for x in runaway[:12])
+                  + ("..." if len(runaway) > 12 else "") + ")")
+                 if runaway else ""))
+    print("    with COARSE=0 the reachable range is one TRIM_L band, which is")
+    print("    the band SystemInit left; the servo can no longer leave it, and")
+    print("    can no longer be thrown out of the acceptance window by an")
+    print("    escape that moves the clock the wrong way (E7).")
     return True
 
 
