@@ -1218,6 +1218,14 @@ usb_rx_chain:
 /* The overflow escape for SEG5 in cell 5 comes FIRST: cell 5's `bhs' is a
  * Thumb conditional branch with 254 bytes of reach and the four stubs below
  * are now bigger than that (the arm gate went into them). */
+	.global usb_rx_ovf_a		/* a REAL symbol, so that
+					 * engine16_cyc.py's block for cell 7
+					 * still ends where the cell does; a
+					 * .L name is invisible to it and the
+					 * cell would read 18..21 instead of
+					 * 16..18 for no reason but this
+					 * label's name. */
+usb_rx_ovf_a:
 .Lovf_a:
 	b       .Lusb_overrun
 
