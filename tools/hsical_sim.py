@@ -929,6 +929,38 @@ def e8():
                      fmt(max(tail))))
     table(rows, ["configuration", "cyc/ms per step", "loop gain",
                  "frames to LOCK", "min err %", "max err %"])
+    print()
+    print("    A dead band narrower than half a trim step is a limit cycle:")
+    print("    the loop leaves the band on every correction.  Sweep 60 start")
+    print("    points per configuration and count the ones that never stop")
+    print("    writing.")
+    rows = []
+    for band, h, targ, label in (
+            ("F002B_FS100", 5, 24e6, "F002B 24 MHz, TRIM_H=5"),
+            ("F002B_FS101", 8, 48e6, "F002B 48 MHz build, TRIM_H=8"),
+            ("F003_FS100", 8, 24e6, "F003 24 MHz, TRIM_H=8")):
+        st = Plant(band).step_hz(Plant(band).icscr_for(targ, h=h)) / 1e3
+        hunt, worst = 0, 0.0
+        defs = ("-DPY32_HSICAL_FCPU=%d" % int(targ),) if targ != 24e6 else ()
+        for k in range(60):
+            # The offset goes in the PLANT, as a part-to-part / temperature
+            # scale on the whole band: a real drift moves the frequency
+            # between trim steps, so the servo cannot land exactly on target.
+            p = Plant(band, spread=1.0 + (k - 30) * 0.0004)
+            i = p.icscr_for(targ, h=h)
+            s = make(p, targ, target=targ, defines=defs, band_h=h)
+            s.icscr = i
+            s.f = p.freq(i)
+            tr = runsim(s, 400, target=targ)
+            w = tr.writes[-1] - tr.writes[100]
+            if w > 4:
+                hunt += 1
+            worst = max(worst, max(abs(x) for x in tr.err[100:]))
+        rows.append((label, "%.1f" % st, "%.1f" % (16.0 / (st / 2.0)),
+                     "%d/60" % hunt, fmt(worst)))
+    table(rows, ["configuration", "cyc/ms per step",
+                 "dead band / half step", "start points that hunt",
+                 "worst |err| after settling %"])
     return True
 
 

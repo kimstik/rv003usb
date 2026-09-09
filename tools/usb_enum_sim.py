@@ -304,6 +304,13 @@ STUBS = """
 \t.thumb_func
 \t.global _start
 _start:\tb _start
+"""
+
+# The engine calls py32_hsical_event at both ISR exits.  With --hsical the
+# REAL rv003usb/py32/py32_hsical.c is linked in its place; without it, this
+# stub, which is what every run before 2026-09-09 used and what
+# doc/py32/CLOCK_SERVO.md exists because of.
+HSICAL_STUB = """
 \t.thumb_func
 \t.global py32_hsical_event
 py32_hsical_event:\tbx lr
@@ -318,7 +325,7 @@ def run(cmd):
     return p.stdout
 
 
-def build(workdir, demo="demo_gamepad"):
+def build(workdir, demo="demo_gamepad", hsical=False):
     """Assemble both engines the way INTEGRATION_BUILD.md does (.datacode ->
     .text.engine16, flash-resident) and link them against the REAL C layer
     and the REAL descriptors.  The only thing stubbed is the CH32V003 vendor
@@ -336,11 +343,12 @@ def build(workdir, demo="demo_gamepad"):
         objs.append(p)
     p = os.path.join(workdir, "stubs.S")
     with open(p, "w") as f:
-        f.write(STUBS)
+        f.write(STUBS if hsical else (STUBS + HSICAL_STUB))
     objs.append(p)
 
     inc = ["-I" + os.path.join(ROOT, d)
-           for d in ("tools/sim_shim", "lib", "rv003usb", demo)]
+           for d in ("tools/sim_shim", "lib", "rv003usb", demo,
+                     "rv003usb/py32")]
     common = ["-mcpu=cortex-m0plus", "-mthumb", "-DUSB_ENGINE16_FLASH=1"] + inc
     out = []
     for s in objs:
@@ -348,8 +356,11 @@ def build(workdir, demo="demo_gamepad"):
         run(["arm-none-eabi-gcc", "-x", "assembler-with-cpp"] + common +
             ["-c", s, "-o", o])
         out.append(o)
-    for s in (os.path.join(ROOT, "rv003usb/rv003usb.c"),
-              os.path.join(ROOT, demo, demo + ".c")):
+    csrc = [os.path.join(ROOT, "rv003usb/rv003usb.c"),
+            os.path.join(ROOT, demo, demo + ".c")]
+    if hsical:
+        csrc.append(os.path.join(ROOT, "rv003usb/py32/py32_hsical.c"))
+    for s in csrc:
         o = os.path.join(workdir, os.path.basename(s)[:-2] + ".o")
         run(["arm-none-eabi-gcc", "-Os", "-ffreestanding", "-fno-builtin"] +
             common + ["-c", s, "-o", o])
@@ -425,10 +436,15 @@ class Machine:
         for vma, blob in sections(elf):
             uc.mem_write(vma, blob)
         uc.mmio_map(GPIO_BASE & ~0xFFF, 0x1000, self._rd, None, self._wr, None)
+        # EXTI and RCC share the 0x40021000 page (py32f002bx5.h:433-434:
+        # RCC_BASE = AHB+0x1000, EXTI_BASE = AHB+0x1800).  ICSCR is the
+        # servo's actuator and is served here; everything else on the page
+        # reads zero and absorbs writes, as before.
         uc.mmio_map(EXTI_BASE & ~0xFFF, 0x1000,
-                    lambda *a: 0, None, lambda *a: None, None)
-        uc.mmio_map(0xE000E000, 0x1000,
-                    lambda *a: 0, None, lambda *a: None, None)
+                    self._ahb_rd, None, self._ahb_wr, None)
+        # SysTick, a real 24-bit down-counter over the device cycle clock:
+        # the servo's reference (py32_hsical.h:PY32_HSICAL_TICK_ADDR).
+        uc.mmio_map(0xE000E000, 0x1000, self._scs_rd, None, self._scs_wr, None)
         uc.hook_add(UC_HOOK_CODE, self._code)
         uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self._mem)
         uc.hook_add(UC_HOOK_MEM_UNMAPPED, self._unmapped)
@@ -447,6 +463,13 @@ class Machine:
         self.calls = {}                 # symbol -> times entered
         self.watch = {}
         self.stray = []                 # writes to the shim peripheral page
+        # the clock servo's two peripherals
+        self.icscr = 0
+        self.icscr_writes = []          # (cycle, value)
+        self.st_ctrl = 0
+        self.st_load = 0xFFFFFF
+        self.st_ref = 0
+        self.st_running = False
 
     # ------------------------------------------------------------ the clock
     # Charge the PREVIOUS instruction before the current one runs, so self.cyc
@@ -538,6 +561,39 @@ class Machine:
             self.moder = value
             self.oe = bool(value & MODER_MASK)
             self._pin_event()
+
+    # --------------------------------------------- SysTick and RCC->ICSCR
+    def _scs_rd(self, uc, offset, size, ud):
+        a = 0xE000E000 + (offset & 0xFFF)
+        if a == 0xE000E010:
+            return self.st_ctrl
+        if a == 0xE000E014:
+            return self.st_load
+        if a == 0xE000E018:
+            if not self.st_running:
+                return 0
+            period = self.st_load + 1
+            return (period - (int(self.cyc - self.st_ref) % period)) % period
+        return 0
+
+    def _scs_wr(self, uc, offset, size, value, ud):
+        a = 0xE000E000 + (offset & 0xFFF)
+        if a == 0xE000E010:
+            self.st_ctrl = value & 7
+            self.st_running = bool(value & 1)
+        elif a == 0xE000E014:
+            self.st_load = value & 0xFFFFFF
+        elif a == 0xE000E018:
+            self.st_ref = self.cyc
+
+    def _ahb_rd(self, uc, offset, size, ud):
+        return self.icscr if (0x40021000 + (offset & 0xFFF)) == 0x40021004 \
+            else 0
+
+    def _ahb_wr(self, uc, offset, size, value, ud):
+        if (0x40021000 + (offset & 0xFFF)) == 0x40021004:
+            self.icscr = value & 0xFFFF
+            self.icscr_writes.append((self.cyc, self.icscr))
 
     def _pin_event(self):
         e = (self.cyc, self.oe, self.odr[0], self.odr[1])
@@ -1543,6 +1599,9 @@ def main():
                     help="re-run the whole enumeration at every entry latency")
     ap.add_argument("--no-ksweep", action="store_true")
     ap.add_argument("--keep", default=None, help="keep the build here")
+    ap.add_argument("--hsical", action="store_true",
+                    help="link the REAL rv003usb/py32/py32_hsical.c instead "
+                         "of the bx-lr stub (see tools/hsical_sim.py)")
     a = ap.parse_args()
 
     selfcheck()
@@ -1550,7 +1609,7 @@ def main():
           "0x15, endp 0x0E -> 0x1D),\n  CRC16 of an empty payload is 0x0000, "
           "every PID byte matches Table 8-1")
     wd = a.keep or tempfile.mkdtemp(prefix="usbenum.")
-    elf, syms = build(wd)
+    elf, syms = build(wd, hsical=a.hsical)
     print("linked %s" % elf)
     for sym in ("usb_rx_engine16", "usb_send_data", "usb_in_render",
                 "usb_pid_handle_setup", "usb_pid_handle_data",
