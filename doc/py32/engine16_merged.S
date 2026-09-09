@@ -305,6 +305,20 @@
 #define TI_BITS_OFS     8
 #define TI_BITS_BYTES   13
 #define TI_SRC_OFS      24
+/* +28 u32 r5pat  THE WHOLE TOKEN AS ONE WORD - the raw wire samples r5
+ *                holds at the EOP stub for a legal "IN, this device, this
+ *                endpoint" token: a sentinel 1 (the last SYNC sample, D+
+ *                high) followed by every wire bit of the PID, the address,
+ *                the endpoint and the CRC5, NRZI and bit stuffing included.
+ *                A token is 24 data bits plus at most three stuffed ones,
+ *                so the whole packet after SYNC is 24..27 samples and fits
+ *                r5 with the sentinel above it - which makes ONE compare
+ *                settle the PID, the address, the endpoint, the CRC5 and
+ *                the length, BEFORE the transmitter is armed.  Learned from
+ *                the wire in .Lt_in, exactly where tokpat is (S BUS_COLLISIONS).
+ *                Zero = nothing learned, and zero is not a legal value
+ *                because the sentinel bit is always set. */
+#define TI_R5_OFS       28
 #define TI_REC_SIZE     32		/* power of two: the index is a shift */
 #define TI_REC_SHIFT    5
 #define TI_PID_IN       0x69		/* the token PID this path answers   */
@@ -1100,28 +1114,67 @@ rx_eop\idx:
 	movs    r2, #\unsampled	/* 1  wire-bit slots never sampled   */
 	mov     r14, r2			/* 1                                 */
 #if USB_TURNAROUND_B
+	/* ---- THE ARM GATE: nothing below this drives unless the packet
+	 * that just ended is one this device owes a response to.
+	 * BUS_COLLISIONS.md is the derivation; the three tests are:
+	 *
+	 * 1. r12 >= 2.  The pipeline commits wire byte N during byte N+1's
+	 *    cells, and a handshake is SYNC + PID + EOP - there IS no byte
+	 *    N+1 - so at this instant rxbuf+3 still holds the PREVIOUS
+	 *    packet's PID and reading it decides on stale data.  The emitted
+	 *    count does not lie: a handshake has committed exactly one byte
+	 *    (SYNC) and every longer packet at least two, so `r12 >= 2' is
+	 *    the same statement as "rxbuf+3 belongs to THIS packet" and it
+	 *    comes out of a register the engine maintains itself.
+	 * 2. the PID is DATA0 or DATA1, for the ACK arm.  TB_OWED alone says
+	 *    only that a SETUP or OUT token came before; it does not say the
+	 *    packet that just ended is the DATA that token promised, and a
+	 *    SOF or another token arriving in between armed the transmitter
+	 *    for a packet that can never be answered.
+	 * 3. r5, for the IN arm - see TI_R5_OFS.  One compare against a
+	 *    learned word settles the PID, the address, the endpoint, the
+	 *    CRC5 and the length together, and it does it HERE, ahead of
+	 *    TBARM, instead of at TIG6/TIG9 eight bit times after the
+	 *    drivers are already on.
+	 * Cost on the DATA->ACK path is 11 cycles and on the IN path 18;
+	 * both are inside turnaround.md S2's [tau+60, tau+124]. */
+	mov     r2, r12			/* 1  USB bytes committed so far     */
+	cmp     r2, #2			/* 1  a handshake commits exactly one*/
+	blo     3f			/* 1 NOT TAKEN on either arm         */
 	mov     r2, r9			/* 1  rxbuf base                     */
-	ldrb    r2, [r2, #TB_OWED_OFS]	/* 4  is a response owed?            */
-	cmp     r2, #0			/* 1                                 */
-	beq     1f			/* 1 NOT TAKEN on the response path  */
-	b       tb_flush\idx		/* 2-3  yes: Design B                */
-1:
-#endif
-#if USB_TURNAROUND_B_IN
-	/* The IN arm, and it is DOWNSTREAM of the ACK test on purpose: an IN
-	 * token has no predecessor that identifies it, so this path has to
-	 * read the PID out of the buffer - a second 4-cycle RAM byte - and
-	 * putting it first would charge those cycles to the DATA->ACK path
-	 * that turnaround.md S11 already measured at tau+115.  Here the IN
-	 * stub costs 21 against the ACK stub's 12, and design_b_in.md S2's
-	 * 17 absent CRC16 cycles pay for it twice over. */
+	ldrb    r2, [r2, #1]		/* 4  THIS packet's PID byte         */
+	adds    r2, r2, #5		/* 1  \ Z <=> (pid & 7) == 3, which  */
+	lsls    r2, r2, #29		/* 1  / is DATA0/DATA1 and not the   */
+					/*      DATA2/MDATA aliases          */
+	bne     4f			/* 1 NOT TAKEN on the DATA path      */
 	mov     r2, r9			/* 1                                 */
-	ldrb    r2, [r2, #1]		/* 4  the RECEIVED PID byte          */
-	cmp     r2, #TI_PID_IN		/* 1                                 */
-	bne     2f			/* 1 NOT TAKEN on the IN path        */
+	ldrb    r2, [r2, #TB_OWED_OFS]	/* 4  is a handshake owed?           */
+	cmp     r2, #0			/* 1                                 */
+	beq     3f			/* 1 NOT TAKEN on the response path  */
+	b       tb_flush\idx		/* 2-3  yes: Design B                */
+4:
+#if USB_TURNAROUND_B_IN
+	/* The IN arm.  r6 - the D+|D- sample mask - is dead from the instant
+	 * SE0 was detected and is TBARM's to overwrite anyway, so it is the
+	 * one free register here besides r2 and it carries the record base
+	 * down the scan. */
+	ldr     r6, =usb_in_arm		/* 2/4                               */
+	.rept   ENDPOINTS - 1
+	ldr     r2, [r6, #TI_R5_OFS]	/* 4                                 */
+	cmp     r2, r5			/* 1  THE WHOLE TOKEN, in one word   */
+	beq     5f			/* 1                                 */
+	adds    r6, r6, #TI_REC_SIZE	/* 1                                 */
+	.endr
+	ldr     r2, [r6, #TI_R5_OFS]	/* 4                                 */
+	cmp     r2, r5			/* 1                                 */
+	bne     3f			/* 1                                 */
+5:	ldrh    r2, [r6, #TI_PAT_OFS]	/* 4  and is a packet armed for it?  */
+	cmp     r2, #0			/* 1  (a learned key outlives the    */
+	beq     3f			/* 1   render that did not happen)   */
 	ldr     r2, =(ti_flush\idx + 1)	/* 2/4  the IN chain is past a B's   */
 	bx      r2			/* 3    reach from here              */
-2:
+#endif
+3:
 #endif
 	b       rx_flush\idx		/* 2-3  no: the ordinary path        */
 	.endm
@@ -1726,6 +1779,14 @@ usb_tb_head:
 	movs    r1, #1
 	ldr     r2, =usb_tx_suppress
 	strb    r1, [r2]
+	/* r5 is a BSRR word on this path, not the wire packer, so the token
+	 * key is unknown rather than stale.  Zero says so: no r5 the stub
+	 * ever sees can be zero (the sentinel bit is always set), so a
+	 * record keyed with it is simply never matched and the next token
+	 * for that endpoint re-learns through the ordinary path. */
+	movs    r1, #0
+	ldr     r2, =usb_rx_wire
+	str     r1, [r2, #0]
 	b       .Lrx_tail
 .Ltb_dropped:
 	b       .Lusb_done
@@ -1746,6 +1807,17 @@ rx_flush4:	SEG4
 rx_flush5:	SEG5    .Lovf_b
 rx_flush6:	SEG6
 rx_flush7:
+	/* THE TOKEN KEY.  r5 is still the raw wire packer here - CELL's
+	 * `adcs r5,r5' was its last writer and no SEG touches it - so this
+	 * one word is every wire bit of the packet after SYNC, with a
+	 * sentinel above them.  .Lt_in installs it as the arm record's
+	 * r5pat when it learns the token halfword, and the EOP stub compares
+	 * against it BEFORE arming (TI_R5_OFS).  Every ordinary-path entry
+	 * falls through here, so this covers all eight K; the Design B
+	 * epilogue zeroes it instead, because there r5 is a BSRR word.
+	 * Untimed: the flush is past every deadline this engine has. */
+	ldr     r2, =usb_rx_wire
+	str     r5, [r2, #0]
 	/* The last, partial wire byte: r14 holds 8-k, the number of bit slots
 	 * never sampled.  Left-shifting the decoded byte by that amount moves
 	 * the k real bits to the top and feeds zeros in below.  Those zeros
@@ -1991,6 +2063,16 @@ rx_flush7:
 	strh    r5, [r7, #TI_PAT_OFS]	/* disarm NOW: only a completed      */
 					/* render re-arms, so a handler that */
 					/* sends nothing leaves nothing armed*/
+	/* And learn the WIRE form of the same token, for the EOP stub's arm
+	 * gate (TI_R5_OFS).  It is learned here and nowhere else, for the
+	 * same reason tokpat is: at this point the CRC5 has been checked,
+	 * the endpoint bounded and the address filtered, so the word saved
+	 * at rx_flush7 is a verified "IN, this device, this endpoint".  It
+	 * is written on the SAME branch as the disarm, so the two keys never
+	 * describe different tokens: the gate needs both to fire. */
+	ldr     r5, =usb_rx_wire
+	ldr     r5, [r5, #0]
+	str     r5, [r7, #TI_R5_OFS]
 	ldr     r7, =usb_in_pend
 	strh    r6, [r7, #0]
 	strb    r2, [r7, #3]
@@ -3076,6 +3158,24 @@ usb_in_arm:
 	.if     (TI_SRC_OFS + 4) > TI_REC_SIZE
 	.error  "engine16_merged: the IN arm record cannot hold its src word"
 	.endif
+	.if     (TI_R5_OFS + 4) > TI_REC_SIZE || (TI_R5_OFS & 3) != 0
+	.error  "engine16_merged: the IN arm record cannot hold its r5 key"
+	.endif
+	.if     TI_R5_OFS < (TI_SRC_OFS + 4)
+	.error  "engine16_merged: the r5 key overlaps the src word"
+	.endif
+#endif
+
+#if USB_TURNAROUND_B && USB_TURNAROUND_B_IN
+/* The raw wire packer of the last packet that came through the ordinary
+ * flush.  One word, written untimed at rx_flush7 and read only by .Lt_in.
+ * See TI_R5_OFS. */
+	.section .bss.usb_rx_wire, "aw", %nobits
+	.balign 4
+	.global usb_rx_wire
+usb_rx_wire:
+	.space  4
+	.size   usb_rx_wire, 4
 #endif
 
 	.section .bss.usb_tx_suppress, "aw", %nobits
