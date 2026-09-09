@@ -773,6 +773,23 @@ def e5():
                      "yes" if max(abs(x) for x in tail) <= WIN_FAST else "NO"))
     table(rows, ["stamp jitter +-cyc", "frame tol", "min err %", "max err %",
                  "trim writes in 400 frames", "stays in +-0.203%"])
+    print()
+    print("    (d) a MISSED keep-alive is only rejected while the clock is")
+    print("    fast enough.  The acceptance ceiling is 36000 cycles, so a")
+    print("    two-frame gap is inside the window for any clock below 18 MHz")
+    print("    - and 18 MHz is inside the servo's own capture range.")
+    rows = []
+    for e0 in (-5, -15, -25, -30):
+        for miss in (False, True):
+            s = make(p, 24e6 * (1 + e0 / 100.0))
+            drop = set(range(1, 400, 2)) if miss else set()
+            tr = runsim(s, 400, dropout=drop)
+            rows.append((fmt(e0, 0), "every 2nd" if miss else "none",
+                         "%.2f" % (24e6 * (1 + e0 / 100.0) / 1e6),
+                         fmt(tr.err[-1]), tr.state[-1],
+                         "yes" if settled(tr, WIN_FAST, 30) else "NO"))
+    table(rows, ["initial err %", "keep-alives dropped", "start MHz",
+                 "err after 400 frames %", "state", "in +-0.203%"])
     return True
 
 
@@ -995,6 +1012,72 @@ def e9():
     print("    instructions in py32_hsical.c executed at least once: %d"
           % len(s.pc_trace))
     return True
+
+
+@experiment("EA", "the seam: the real engine ISR driving the real servo")
+def ea():
+    """Everything above calls py32_hsical_event() directly.  This one goes
+    through doc/py32/engine16_merged.S: the D- interrupt is taken, the two
+    entry instructions load SysTick->VAL, the SE0 test forks to
+    usb_rx_keepalive, EXTI_PR is acked, and `bl py32_hsical_event` is reached
+    across the `push {r1, lr}` / `pop {r1, pc}` frame the engine sets up for
+    it.  The loop is still closed: the ICSCR the servo writes sets the rate at
+    which the next keep-alive's cycle position is computed."""
+    import tempfile
+    import usb_enum_sim as U
+
+    wd = tempfile.mkdtemp(prefix="hsical_seam.")
+    elf, syms = U.build(wd, hsical=True)
+    for want in ("py32_hsical_event", "py32_hsical_init", "usb_rx_keepalive",
+                 "usb_rx_engine16"):
+        if want not in syms:
+            print("    FAIL: %s did not link" % want)
+            return False
+    print("    linked the real servo into the real engine image:"
+          " py32_hsical_event @ %08x" % syms["py32_hsical_event"])
+
+    p = Plant("F002B_FS100")
+    m = U.Machine(elf, syms)
+    m.icscr = p.icscr_for(24e6 * 1.02, h=5)
+
+    def call(sym):
+        m.uc.reg_write(U.UC_ARM_REG_SP, U.RAM_BASE + U.RAM_SIZE - 0x100)
+        m.uc.reg_write(U.UC_ARM_REG_LR, (syms["_start"] & ~1) | 1)
+        m.pending = None
+        m.uc.emu_start(syms[sym] | 1, syms["_start"] & ~1, 0, 100000)
+
+    call("py32_hsical_init")
+    if not m.st_running:
+        print("    FAIL: py32_hsical_init did not start SysTick")
+        return False
+    print("    py32_hsical_init started SysTick: CTRL=0x%X LOAD=0x%06X"
+          % (m.st_ctrl, m.st_load))
+
+    sp0 = m.uc.reg_read(U.UC_ARM_REG_SP)
+    at = 100000.0
+    rows = []
+    keepalive = [U.SE0, U.SE0, U.J]
+    for n in range(10):
+        f = p.freq(m.icscr)
+        m.host_seg = (at, keepalive)
+        before = len(m.icscr_writes)
+        err, spent = m.isr(at + 16)
+        if err is not None:
+            print("    FAIL: the ISR faulted on a keep-alive: %r" % err)
+            return False
+        sp = m.uc.reg_read(U.UC_ARM_REG_SP)
+        rows.append((n + 1, "0x%04X" % m.icscr, "%.4f" % (p.freq(m.icscr) / 1e6),
+                     fmt(100 * (p.freq(m.icscr) - 24e6) / 24e6),
+                     len(m.icscr_writes) - before, spent,
+                     "ok" if sp == sp0 else "LEAK %+d" % (sp - sp0)))
+        at += p.freq(m.icscr) * 1e-3
+    table(rows, ["keep-alive", "ICSCR", "MHz", "err %", "ICSCR writes",
+                 "ISR cycles", "SP balance"])
+    hit = sum(1 for a in m.pc_trace if a == (syms["usb_rx_keepalive"] & ~1))
+    print("    the keep-alive path was the one taken: usb_rx_keepalive %s"
+          % ("entered" if hit else "NEVER ENTERED - the SE0 test forked wrong"))
+    print("    total ICSCR writes through the engine: %d" % len(m.icscr_writes))
+    return bool(m.icscr_writes) and hit > 0
 
 
 def main(argv):
