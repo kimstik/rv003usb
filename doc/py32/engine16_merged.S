@@ -390,8 +390,11 @@
  * 24 MHz (S8.3).  It turns itself off under RV003USB_USER_DATA_HANDLES_TOKEN,
  * where the response to a DATA packet is NOT a foregone conclusion and the
  * user handler owns it (turnaround.md S4.2, rv003usb.c:359); with the option
- * set the arming flag is never written, so the whole path is unreachable and
- * the engine behaves exactly as it did before. */
+ * set the whole early-response path is compiled out and the engine
+ * behaves exactly as it did before.  The arming flag itself IS still
+ * written in that build - .Ldata's arm gate reads it to decide whether a
+ * DATA packet belongs to this device at all, which is a question every
+ * build has to answer (LATE_RESPONSES.md). */
 #ifdef  RV003USB_USER_DATA_HANDLES_TOKEN
 #define USB_TURNAROUND_B        0
 #endif
@@ -1914,6 +1917,36 @@ rx_flush7:
 .Ldata:
 	cmp     r0, #4			/* SYNC + PID + CRC16 at least       */
 	blo     .Ldone_t
+	/* ---- THE DATA ARM GATE (LATE_RESPONSES.md).  A DATA packet carries
+	 * no address (S8.4.1 Figure 8-4: SYNC, PID, payload, CRC16 and nothing
+	 * else), so the ONLY thing that says a DATA on this wire belongs to
+	 * this device is that a SETUP or OUT token addressed to it came
+	 * immediately before.  TB_OWED is exactly that statement: it is
+	 * written at .Lusb_done_owed, past the address filter and the
+	 * endpoint bound, and cleared by the tail of every other packet - and
+	 * this test runs BEFORE this packet's own tail rewrites it.
+	 *
+	 * Without it the C layer answers: rv003usb.c's usb_pid_handle_data
+	 * falls through to `just_ack' for every DATA it is handed, which is
+	 * upstream's behaviour unchanged (cnlohr/rv003usb@80b1893,
+	 * rv003usb.S:518-534 has no arm test either).  On a hub, S11.8.2
+	 * broadcasts every downstream low-speed packet to EVERY enabled
+	 * low-speed port, so a second low-speed device's SETUP data lands
+	 * here with nothing armed and was answered with an ACK 367 cycles
+	 * after tau - three times the S7.1.18 deadline, on top of the real
+	 * device's ACK and the host's next token.  It also flipped
+	 * e->toggle_out for a transfer this device is not in.
+	 *
+	 * The gate belongs here and not in rv003usb.c: the arm state is the
+	 * engine's (the C layer's ist->setup_request is set by SETUP only,
+	 * never by OUT, and outlives the data stage), and the shared C file
+	 * must not learn the ISA or grow a port-only field.  Three
+	 * instructions, 6 cycles, all of them in the post-EOP tail - not one
+	 * inside a bit cell and not one before a response that is already on
+	 * the wire by now on the Design B path. */
+	ldrb    r1, [r6, #TB_OWED_OFS]	/* r6 == r9 == usb_rxbuf+2 (.Lrx_tail)*/
+	cmp     r1, #0
+	beq     .Ldone_t		/* nothing armed: drop it, S8.5.3    */
 	/* CRC_ROUND2.md S1.4: the complement test above admits four PIDs of
 	 * type 3, and only two of them are legal on a low-speed bus - DATA0
 	 * (0xC3) and DATA1 (0x4B).  The other two are DATA2 (0x87) and MDATA
@@ -2217,7 +2250,14 @@ rx_flush7:
  * keepalive exit does NOT pass through here, deliberately - a keep-alive EOP
  * between the token and its data must not disarm us. */
 .Lusb_done_owed:
-	movs    r0, #USB_TURNAROUND_B
+	/* 1, not USB_TURNAROUND_B: this byte now has TWO readers.  The EOP
+	 * stub's arm gate reads it under #if USB_TURNAROUND_B and decides
+	 * whether to answer early; .Ldata reads it in every build and decides
+	 * whether to answer AT ALL.  A build with Design B off (that is,
+	 * RV003USB_USER_DATA_HANDLES_TOKEN) still has to know which DATA
+	 * packets are its own, and storing the option here would have told it
+	 * "none of them". */
+	movs    r0, #1
 	movs    r1, #TB_PID_ACK
 	b       1f
 .Lusb_done:
