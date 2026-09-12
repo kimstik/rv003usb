@@ -388,17 +388,53 @@ then rejected: 500 frames, 0 writes, still 12.90 MHz, state `IDLE`. A part
 whose `SystemInit` leaves it there, or a servo pushed there by §5d, never
 recovers.
 
-**(EB) The header already offers the branch that removes this.**
-`PY32_HSICAL_COARSE` is a build switch (`py32_hsical.h:52`). Sweeping the same
-range with each setting:
+**(EB) The build switch was the wrong instrument.**
+`PY32_HSICAL_COARSE` is a build switch (`py32_hsical.h:52`), and turning it
+off does remove every runaway — at the price of 4.5 % of capture range,
+because the servo can then never leave the `TRIM_L` band `SystemInit` left it
+in:
 
 | setting | converges over | start points that end further off than they began |
 |---|---|---|
-| `COARSE=1` (default) | −33.0 % … +49.5 % | **8** (+32.0, +37.5, +39.0, +43.0, +44.5, +46.0, +47.5, +49.0 %) |
+| `COARSE=1`, re-centring | −33.0 % … +49.5 % | **8** (+32.0, +37.5, +39.0, +43.0, +44.5, +46.0, +47.5, +49.0 %) |
 | `COARSE=0` | −28.5 % … +49.5 % | **0** |
 
-4.5 % of capture range buys the removal of every runaway. This is a
-build-switch measurement, not an algorithm change.
+**FIXED, and the trade turned out to be unnecessary.** The escape now steps
+`TRIM_H` and leaves `TRIM_L` **pinned** at the edge it saturated against
+instead of re-centring it at `TRIM_L_MID`:
+
+| setting | converges over | start points that end further off than they began |
+|---|---|---|
+| **`COARSE=1`, pinned** | **−33.0 % … +49.5 %** | **0** |
+| `COARSE=0` | −28.5 % … +49.5 % | 0 |
+
+The full capture range **and** zero runaways, so `COARSE=0` has nothing left
+to offer. The measured moves that make it work, over `TRIM_H` 0..8 on both
+parts:
+
+| | re-centred | pinned |
+|---|---|---|
+| up-escape | −13 … −15 % (opposite) | **+4.0 … +6.7 %** |
+| down-escape | +22 … +25 % (opposite) | **−3.8 … −6.0 %** |
+
+Monotone, in the direction asked for, with no exception across the range.
+
+The earlier costing here said doing this properly "needs a divide the M0+ does
+not have". That was the wrong problem. Exact mapping of the old frequency into
+the new band is only required if the frequency must be *continuous* across a
+band change. A servo does not have to land — it has to stay inside the
+acceptance window, and it walks the rest itself, one `TRIM_H` step per frame,
+at 1 ms a frame and ~5 % a step. There is ample time for that; the servo runs
+in the keep-alive ISR once a millisecond.
+
+It is also **smaller** than what it replaces — two assignments and two
+branches gone:
+
+```
+  re-centred (COARSE=1)   348 B
+  pinned     (COARSE=1)   336 B
+  COARSE=0                308 B
+```
 
 ---
 
@@ -514,7 +550,7 @@ loop converges in three keep-alives through the real ISR. Two things to record:
 | # | defect | severity | what it costs to fix |
 |---|---|---|---|
 | **D1** | The servo is fed every USB interrupt, so the last-packet-to-next-keep-alive gap is measured as a frame. A trimmed clock is driven to +10…+25 % within ~15 frames and stays there, reporting `LOCKED`. §6 | **fatal in normal operation** | see below |
-| **D2** | `PY32_HSICAL_COARSE`'s saturation escape moves the clock 13–25 % in the direction opposite to the correction that triggered it, and can throw it past the acceptance ceiling permanently. 8 of 383 swept start points. §7 | **serious**, reachable only near band edges | see below |
+| ~~D2~~ | `PY32_HSICAL_COARSE`'s saturation escape moves the clock 13–25 % in the direction opposite to the correction that triggered it, and can throw it past the acceptance ceiling permanently. 8 of 383 swept start points. §7 | **FIXED** | pin `TRIM_L` instead of re-centring it: 8 runaways → 0, capture range kept, 12 B smaller |
 | **D3** | A missed keep-alive is accepted as a frame whenever the clock is below 18 MHz, walking a slow clock further off and into the absorbing floor at 12.9 MHz. §5d | serious, only below 18 MHz | folded into D1's fix |
 | ~~D4~~ | 48 MHz build: dead band (16) is below half a trim step (17.2), so ~5 % of starting points hunt forever. §8 | **FIXED** | the default now follows FCPU: 16 / 18. 3/60 hunting → 0/60 |
 | **D5** | `hsical_state` never leaves `LOCKED`; it is a latch, not a live health flag. §5a | documentation | one line |
@@ -546,11 +582,12 @@ below has been simulated.**
   gap. *Estimated: one `hsical_state` compare and a second pair of bounds,
   ~8 instructions, ~24 B.* Weaker than the structural fix — it depends on the
   device never being polled before it locks.
-* **D2:** `PY32_HSICAL_COARSE=0` today, at a cost of 4.5 % of capture range and
-  a *saving* of ~14 instructions (measured, EB). Doing it properly — mapping
-  the current frequency into the new band instead of re-centring — needs a
-  divide the M0+ does not have. If F002B needs to cross bands, that belongs in
-  the LSI pre-calibration `PLAN.md` already requires, not in the frame servo.
+* **D2: done, and not the way this section first proposed.** The proposal was
+  `COARSE=0` for a 4.5 % loss of capture range, on the grounds that a proper
+  fix "needs a divide the M0+ does not have". Both halves were wrong: the
+  divide answers a question nobody asked (continuity across the band change),
+  and pinning `TRIM_L` instead of re-centring it gives the full capture range,
+  zero runaways and 12 fewer bytes. See (EB) above.
 * **D4:** `PY32_HSICAL_DEADBAND` 16 → 18 for `FCPU`=48000000. Zero cost.
 
 ---
