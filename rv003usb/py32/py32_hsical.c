@@ -88,14 +88,28 @@
  *      load.  Every cycle of jitter is 0.004% of frequency error; the dead
  *      band absorbs 16 cycles of it.
  *
- *   2. AT ISR EXIT, after the packet (if any) is handled, and only there:
+ *   2. AT THE KEEP-ALIVE ISR EXIT, AND NOWHERE ELSE:
  *          bl py32_hsical_event  @ r0 = rS saved from step 1
  *      Never between SYNC and EOP -- this routine takes hundreds of cycles
- *      and would destroy the bit timing.  Call it on EVERY USB interrupt,
- *      including the ones that turn out not to be packets; a low-speed
- *      keep-alive EOP is exactly such an interrupt and is the reference.
- *      No filtering is wanted from the engine: this routine does its own,
- *      by accepting only intervals near one frame.
+ *      and would destroy the bit timing.
+ *
+ *      THE ENGINE MUST FILTER.  This contract used to read "call it on EVERY
+ *      USB interrupt ... no filtering is wanted from the engine: this routine
+ *      does its own, by accepting only intervals near one frame."  That was
+ *      the sentence that broke it, and doc/py32/CLOCK_SERVO.md S6 measures
+ *      what it cost.  The routine's own filter accepts anything above two
+ *      thirds of a frame, and the gap from the LAST PACKET of one frame to
+ *      the next keep-alive is exactly that - a frame minus wherever in it the
+ *      transaction fell.  Fed that, the loop does its job perfectly on the
+ *      wrong quantity: one interrupt-IN transaction per frame drove an
+ *      exactly trimmed 24.000 MHz clock to +11 % .. +25 % within fifteen
+ *      frames and held it there, reporting PY32_HSICAL_LOCKED throughout.
+ *      At +11 % the receiver cannot decode a single packet.
+ *
+ *      Only a keep-alive is a frame boundary.  The engine already separates
+ *      it -- usb_rx_keepalive is entered when D+/D- are both low at ISR entry
+ *      -- so that is the one call site, and every interval the servo is
+ *      offered is now an integer number of frames.
  *
  * The engine must also leave SysTick alone (project rule R9: SysTick
  * free-running, always).  If the port already owns it, build with

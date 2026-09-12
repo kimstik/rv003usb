@@ -85,10 +85,14 @@
  * corrupted line sample into two adjacent flipped data bits.  No bit cell
  * changes at any setting; every cell is 16 cycles by construction.
  *
- * The HSI calibration seam (py32_hsical.h) is wired in the same two places:
- * a SysTick VAL stamp as the first two instructions of the handler, and one
- * bl py32_hsical_event past both ISR exits.  Both compile away entirely at
- * PY32_HSICAL_ENABLE=0.  No bit cell is involved, in either cost model.
+ * The HSI calibration seam (py32_hsical.h): a SysTick VAL stamp as the first
+ * two instructions of the handler, and one bl py32_hsical_event past the
+ * KEEP-ALIVE exit only.  It used to be past both exits, and that was the
+ * defect CLOCK_SERVO.md S6 measures - a packet interrupt is not a frame
+ * boundary, and feeding the servo one drives a trimmed clock to +11..+25 %
+ * while it reports LOCKED.  Both compile away entirely at
+ * PY32_HSICAL_ENABLE=0, and the packet path is now the same 5-word frame at
+ * either setting.  No bit cell is involved, in either cost model.
  *
  * Assembles with:
  *   arm-none-eabi-gcc -x assembler-with-cpp -mcpu=cortex-m0plus -mthumb -c
@@ -870,19 +874,14 @@ usb_rx_keepalive:			/* SE0 already at entry: keepalive   */
 					 * Nothing falls through into it - the
 					 * BX/POP above is unconditional. */
 1:
-#if PY32_HSICAL_ENABLE
-	push    {r2, r3, r4-r7, lr}	/* r2 = the stamp, parked for the tail.
-					 * r3 is PADDING, not data: 7 words
-					 * keeps this frame's residue mod 8 the
-					 * same as the original 5, so the C
-					 * dispatch calls below still make
-					 * their `push {r4}` land on an
-					 * 8-aligned SP - while leaving the
-					 * tail able to pop ONE word and reach
-					 * alignment for its own call. */
-#else
-	push    {r4-r7, lr}
-#endif
+	push    {r4-r7, lr}		/* The packet path no longer carries
+					 * the calibration stamp: see the
+					 * seam note at the head of this file.
+					 * The servo must be fed frame
+					 * BOUNDARIES, and a packet interrupt
+					 * is not one - so this frame is now
+					 * the same 5 words whether the
+					 * calibration is built in or not. */
 	mov     r4, r8
 	mov     r5, r9
 	mov     r6, r10
@@ -2240,40 +2239,14 @@ rx_flush7:
 	movs    r1, #0
 	strb    r1, [r0, #0]
 #endif
-	/* Acknowledge last, not first: our own transmission has toggled D- by
-	 * now and set the flag again, so clearing here is what makes the ISR
-	 * run once per packet - the predecessor's interrupt_complete does the
-	 * same.  Every exit from this engine is either here or the keepalive
-	 * bx lr above; both clear it. */
-	ldr     r0, =USB_EXTI_BASE
-	movs    r1, #(1 << USB_DM_BIT)
-	str     r1, [r0, #USB_EXTI_PR_OFS]
-	pop     {r4-r7}
-	mov     r8, r4
-	mov     r9, r5
-	mov     r10, r6
-	mov     r11, r7
-#if PY32_HSICAL_ENABLE
-	/* THE CALIBRATION CALL, at the one place the contract allows: after
-	 * the packet is handled and nowhere near SYNC..EOP.  The device's
-	 * reply is already on the wire - usb_send_data transmits inline from
-	 * the C handler above - so this does not touch the 2..6.5 bit-time
-	 * turnaround (PRIOR_ART L-1).  It is also after the EXTI ack, so an
-	 * edge arriving during the call re-pends and is served on return
-	 * rather than being lost.
-	 * Frame here is 7 words; popping the stamp leaves 6, i.e. an 8-
-	 * aligned SP for an AAPCS call, and leaves the padding word to be
-	 * dropped afterwards.  r4-r11 are already restored and the callee
-	 * preserves them, so the call is transparent to the caller.
-	 * Cost: py32_hsical.c counts 12 instructions on the reject path and
-	 * ~40 on the once-per-frame path that writes ICSCR.  Worst case that
-	 * is well under the 128 cycles of a SYNC field, and the phase lock
-	 * keys off the LAST SYNC edge, so a packet that starts during the
-	 * call still locks on re-entry. */
-	pop     {r0}			/* the entry stamp                   */
-	bl      py32_hsical_event
-	add     sp, #4			/* drop the alignment padding word   */
-#endif
+	/* The calibration is NOT fed from here.  It used to be, and that was
+	 * the defect CLOCK_SERVO.md S6 measures: the servo accepts any
+	 * interval above two thirds of a frame as a frame, and the gap from
+	 * the last packet of one frame to the next keep-alive is exactly
+	 * that.  One interrupt-IN transaction per frame drove a trimmed
+	 * 24.000 MHz clock to +11..+25 % within fifteen frames, reporting
+	 * LOCKED while it did it.  Only usb_rx_keepalive is a frame boundary,
+	 * so only usb_rx_keepalive feeds the servo now. */
 	pop     {r4-r7, pc}
 
 /* ======================= Design B, the IN direction =======================
