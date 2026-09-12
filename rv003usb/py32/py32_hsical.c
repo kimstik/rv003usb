@@ -225,20 +225,32 @@ static void hsical_actuate(int32_t delta)
 	l += delta;
 
 #if PY32_HSICAL_COARSE
+	/* THE SATURATION ESCAPE.  Step TRIM_H and leave TRIM_L PINNED at the
+	 * edge it saturated against - do not re-centre it.
+	 *
+	 * Re-centring at TRIM_L_MID is what this used to do, on the reading
+	 * that the bands are "roughly continuous" (xm_002b.md:403-418).
+	 * Measured against the real bands they are not, and the escape moved
+	 * the clock 13-15 % DOWN when the servo was asking to go up, and
+	 * 22-25 % UP when it was asking to go down - in the direction opposite
+	 * to the correction that triggered it, every time, far enough to leave
+	 * the acceptance window permanently (CLOCK_SERVO.md S7: 8 of 383 start
+	 * points ended further off than they began).
+	 *
+	 * Pinned, the move is one TRIM_H step at the same end of the band, and
+	 * that is monotone and small - measured across TRIM_H 0..8 on both
+	 * parts, +4.0..+6.7 % on an up-escape and -3.8..-6.0 % on a down one,
+	 * always in the direction asked for.  No mapping of the old frequency
+	 * into the new band is needed and so no division: one step per frame
+	 * and the loop walks the rest, which at 1 ms a frame and ~5 % a step
+	 * crosses the whole capture range in a handful of frames.  It is also
+	 * two assignments and two branches SHORTER than re-centring was. */
 	if (l < 0) {
-		if (h != 0u) {
-			h -= (1u << HSICAL_TRIM_H_POS);
-			l = (int32_t)HSICAL_TRIM_L_MID;
-		} else {
-			l = 0;
-		}
+		if (h != 0u) h -= (1u << HSICAL_TRIM_H_POS);
+		l = 0;
 	} else if (l > 0x1FF) {
-		if (h != HSICAL_TRIM_H_MSK) {
-			h += (1u << HSICAL_TRIM_H_POS);
-			l = (int32_t)HSICAL_TRIM_L_MID;
-		} else {
-			l = 0x1FF;
-		}
+		if (h != HSICAL_TRIM_H_MSK) h += (1u << HSICAL_TRIM_H_POS);
+		l = 0x1FF;
 	}
 #else
 	if (l < 0)          l = 0;
