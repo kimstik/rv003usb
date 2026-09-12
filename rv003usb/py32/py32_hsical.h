@@ -31,9 +31,21 @@
 #define PY32_HSICAL_CYC_PER_STEP 20
 #endif
 
-/* Dead band, in cycles of error, inside which no trim write happens. */
+/* Dead band, in cycles of error, inside which no trim write happens.
+ *
+ * It must exceed HALF a trim step or the loop limit-cycles: inside the band it
+ * writes nothing, one step outside it overshoots back across, and it hunts.
+ * A trim LSB moves a fixed FRACTION of the frequency, so its weight in
+ * cycles-per-frame scales with FCPU - measured 18.8 at 24 MHz and 34.3 at 48
+ * (CLOCK_SERVO.md S8).  A fixed 16 is 1.7 half-steps at 24 MHz, which is
+ * clean at 0 of 60 starting points, and 0.9 at 48 MHz, where 3 of 60 hunt
+ * forever at one trim write per frame.  So the default follows the clock. */
 #ifndef PY32_HSICAL_DEADBAND
+#if PY32_HSICAL_FCPU > 32000000u
+#define PY32_HSICAL_DEADBAND 18
+#else
 #define PY32_HSICAL_DEADBAND 16
+#endif
 #endif
 
 /* Largest trim change applied from a single frame measurement. */

@@ -429,14 +429,40 @@ trim step. At 24 MHz the ratio is 1.7 (safe). At 48 MHz it is 0.9:
 
 | configuration | dead band ÷ half step | start points that hunt | worst \|err\| after settling |
 |---|---|---|---|
-| F002B 24 MHz, `TRIM_H`=5 | 1.7 | 0/60 | 0.039 % |
-| **F002B 48 MHz build** | **0.9** | **3/60** | 0.038 % |
-| F003 24 MHz, `TRIM_H`=8 | 1.7 | 0/60 | 0.038 % |
+| F002B 24 MHz, `TRIM_H`=5 | 1.7 (band 16) | 0/60 | 0.039 % |
+| **F002B 48 MHz build** | **0.9 (band 16)** | **3/60** | 0.038 % |
+| F003 24 MHz, `TRIM_H`=8 | 1.7 (band 16) | 0/60 | 0.038 % |
 
 5 % of starting points hunt forever in the 48 MHz build — one trim write per
 frame, ±0.04 % of clock movement between packets. The amplitude is harmless;
 the writes are not free and the clock moving during a packet is not obviously
-harmless. A 48 MHz build should raise `PY32_HSICAL_DEADBAND` to ≥ 18.
+harmless.
+
+**FIXED.** `PY32_HSICAL_DEADBAND`'s default now follows `PY32_HSICAL_FCPU`:
+16 at or below 32 MHz, 18 above. A trim LSB moves a fixed *fraction* of the
+frequency, so its weight in cycles-per-frame scales with the clock while a
+constant does not — that mismatch is the whole defect. Confirmed by the
+preprocessor, not by reading:
+
+```
+FCPU=24000000 -> PY32_HSICAL_DEADBAND = 16
+FCPU=48000000 -> PY32_HSICAL_DEADBAND = 18
+```
+
+and re-measured:
+
+| configuration | dead band ÷ half step | start points that hunt | worst \|err\| |
+|---|---|---|---|
+| F002B 24 MHz, `TRIM_H`=5 | 1.7 (band 16) | 0/60 | 0.039 % |
+| **F002B 48 MHz build** | **1.0 (band 18)** | **0/60** | 0.035 % |
+| F003 24 MHz, `TRIM_H`=8 | 1.7 (band 16) | 0/60 | 0.038 % |
+
+24 MHz is deliberately untouched: 16 measured clean there, and a validated
+configuration should not move for a defect it does not have.
+
+E8's ratio column used to be computed from a hardcoded 16, so it kept printing
+0.9 for the 48 MHz build after the default had already become 18. It now reads
+the constant the configuration actually compiled.
 
 ---
 
@@ -490,7 +516,7 @@ loop converges in three keep-alives through the real ISR. Two things to record:
 | **D1** | The servo is fed every USB interrupt, so the last-packet-to-next-keep-alive gap is measured as a frame. A trimmed clock is driven to +10…+25 % within ~15 frames and stays there, reporting `LOCKED`. §6 | **fatal in normal operation** | see below |
 | **D2** | `PY32_HSICAL_COARSE`'s saturation escape moves the clock 13–25 % in the direction opposite to the correction that triggered it, and can throw it past the acceptance ceiling permanently. 8 of 383 swept start points. §7 | **serious**, reachable only near band edges | see below |
 | **D3** | A missed keep-alive is accepted as a frame whenever the clock is below 18 MHz, walking a slow clock further off and into the absorbing floor at 12.9 MHz. §5d | serious, only below 18 MHz | folded into D1's fix |
-| **D4** | 48 MHz build: dead band (16) is below half a trim step (17.2), so ~5 % of starting points hunt forever. §8 | minor | one constant |
+| ~~D4~~ | 48 MHz build: dead band (16) is below half a trim step (17.2), so ~5 % of starting points hunt forever. §8 | **FIXED** | the default now follows FCPU: 16 / 18. 3/60 hunting → 0/60 |
 | **D5** | `hsical_state` never leaves `LOCKED`; it is a latch, not a live health flag. §5a | documentation | one line |
 | **D6** | `.c` cost comments are in instructions and read as cycles; the reject path is 42 cycles not 12, the write path 104 not 40, and the keep-alive ISR peaks at 127 of a claimed-comfortable 128. §9 | documentation | one table |
 

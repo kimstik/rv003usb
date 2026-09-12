@@ -905,6 +905,17 @@ def e7():
     return True
 
 
+def deadband_for(defines=()):
+    """PY32_HSICAL_DEADBAND as the preprocessor resolves it for this build."""
+    import subprocess
+    src = '#include "py32_hsical.h"\nPY32_HSICAL_DEADBAND\n'
+    out = subprocess.run(["arm-none-eabi-cpp", "-I",
+                          os.path.join(ROOT, "rv003usb/py32")]
+                         + list(defines) + ["-"],
+                         input=src, capture_output=True, text=True).stdout
+    return int(out.strip().splitlines()[-1])
+
+
 @experiment("E8", "gain sensitivity: what the LSB weight really is")
 def e8():
     print("    PY32_HSICAL_CYC_PER_STEP is a compile-time constant (20).  The")
@@ -973,7 +984,12 @@ def e8():
             if w > 4:
                 hunt += 1
             worst = max(worst, max(abs(x) for x in tr.err[100:]))
-        rows.append((label, "%.1f" % st, "%.1f" % (16.0 / (st / 2.0)),
+        # The dead band is a compile-time constant that now FOLLOWS FCPU
+        # (py32_hsical.h), so read what this configuration actually compiled
+        # rather than assuming 16 - the hardcoded 16 kept printing 0.9 for the
+        # 48 MHz build after its default had already become 18.
+        db = deadband_for(defs)
+        rows.append((label, "%.1f" % st, "%.1f (band %d)" % (db / (st / 2.0), db),
                      "%d/60" % hunt, fmt(worst)))
     table(rows, ["configuration", "cyc/ms per step",
                  "dead band / half step", "start points that hunt",
